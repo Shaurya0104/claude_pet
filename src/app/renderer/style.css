@@ -30,10 +30,12 @@ html, body {
   -webkit-app-region: no-drag;
 }
 
+/* A canvas, not a background-image. The sheet is 13 megapixels; asking the
+   compositor to rescale all of it and shift background-position every frame
+   cost several percent CPU on its own. drawImage samples only the one frame. */
 #pet {
+  display: block;
   width: 96px; height: 96px;
-  background-repeat: no-repeat;
-  image-rendering: pixelated;       /* keep the pixel art crisp */
   transition: transform .12s ease;
 }
 
@@ -70,7 +72,7 @@ html, body {
 /* --------------------------------------------------------------- bubble --- */
 #bubble {
   position: relative;
-  max-width: 240px;
+  max-width: 290px;
   padding: 7px 11px;
   border-radius: 12px;
   background: rgba(22, 28, 34, .92);
@@ -89,6 +91,16 @@ html, body {
   border-bottom: 1px solid rgba(255,255,255,.10);
   transform: rotate(45deg);
 }
+#bubble-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #7f909c;
+}
+#bubble.linked { cursor: pointer; }
+#bubble.linked:hover { background: rgba(30, 38, 46, .96); }
+#bubble.linked #bubble-meta::after { content: ' · click to open'; color: #5e6d78; }
+
 @keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.96); } }
 
 /* ---------------------------------------------------------------- panel --- */
@@ -115,8 +127,11 @@ html, body {
 /* Buttons that make the pet do something, above the panel. */
 #actions {
   display: flex;
+  flex-wrap: wrap;          /* six buttons never fit on one line at pet width */
+  justify-content: flex-end;
   gap: 6px;
   padding: 6px;
+  max-width: 100%;
   border-radius: 12px;
   background: rgba(18, 23, 28, .94);
   border: 1px solid rgba(255,255,255,.10);

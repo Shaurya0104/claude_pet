@@ -42,7 +42,16 @@
 
     <section>
       <h2>Size</h2>
+      <div class="slider-row">
+        <input id="size" type="range" min="20" max="200" step="5">
+        <output id="size-value">100%</output>
+      </div>
       <div id="sizes" class="chips"></div>
+      <p class="hint" id="size-px"></p>
+      <div class="row">
+        <button id="reset-pos" class="ghost">Reset position</button>
+      </div>
+      <p class="hint">Brings the pet back to the bottom-right of the screen your cursor is on — handy if a monitor gets unplugged.</p>
     </section>
 
     <section>
@@ -50,7 +59,7 @@
       <label class="toggle"><input type="checkbox" id="animate">
         <span><b>Animate</b><i>Turn off to freeze the pet on a single frame.</i></span></label>
       <label class="toggle"><input type="checkbox" id="randomIdle">
-        <span><b>Vary the idle animation</b><i>Rotate through the pet's idle variants at random.</i></span></label>
+        <span><b>Occasional flourishes</b><i>Every few minutes, do something small while idle. Off means it just sits there.</i></span></label>
       <label class="toggle"><input type="checkbox" id="notify">
         <span><b>Notifications</b><i>Tell me when a session needs input, breaks, or finishes.</i></span></label>
       <label class="toggle"><input type="checkbox" id="sound">
@@ -64,9 +73,20 @@
         <span><b>Launch at login</b><i id="loginItem-note"></i></span></label>
     </section>
 
-    <section id="actions-section" hidden>
+    <section>
+      <h2>Hover buttons</h2>
+      <p class="hint">Which buttons appear above the pet while you hover it.</p>
+      <div id="buttons" class="chips"></div>
+    </section>
+
+    <section>
       <h2>Make it do something</h2>
       <div id="actions" class="chips"></div>
+      <div class="chips">
+        <button class="chip" id="feed-fact">Random fact</button>
+        <button class="chip" id="feed-news">Today's news</button>
+      </div>
+      <p class="hint">The pet says it out loud. Click the speech bubble to open the source.</p>
     </section>
   </main>
 

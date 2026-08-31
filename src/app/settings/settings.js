@@ -51,11 +51,23 @@ function renderPets() {
 }
 
 function renderSizes() {
+  const cur = cfg.settings.sizeScale;
+  const slider = $('size');
+  slider.min = Math.round(cfg.sizeMin * 100);
+  slider.max = Math.round(cfg.sizeMax * 100);
+  slider.value = Math.round(cur * 100);
+  $('size-value').textContent = `${Math.round(cur * 100)}%`;
+
+  const pet = cfg.pets.find((p) => p.id === cfg.settings.petId);
+  $('size-px').textContent = pet
+    ? `renders at ${Math.round(pet.frameWidth * (pet.baseScale ?? 1) * cur)}px wide`
+    : '';
+
   const box = $('sizes');
   box.innerHTML = '';
   for (const s of cfg.sizeSteps) {
     const b = document.createElement('button');
-    b.className = 'chip' + (Math.abs(s - cfg.settings.sizeScale) < 0.001 ? ' active' : '');
+    b.className = 'chip' + (Math.abs(s - cur) < 0.001 ? ' active' : '');
     b.textContent = `${Math.round(s * 100)}%`;
     b.addEventListener('click', () => set({ sizeScale: s }));
     box.appendChild(b);
@@ -79,12 +91,26 @@ function renderRestoreOn() {
   }
 }
 
+function renderButtons() {
+  const box = $('buttons');
+  box.innerHTML = '';
+  for (const b of cfg.buttons || []) {
+    const el = document.createElement('button');
+    el.className = 'chip' + (b.enabled ? ' active' : '');
+    el.textContent = b.label;
+    el.addEventListener('click', () => {
+      const next = { ...(cfg.settings.buttons || {}) };
+      next[b.key] = !b.enabled;
+      set({ buttons: next });
+    });
+    box.appendChild(el);
+  }
+}
+
 function renderActions() {
-  const section = $('actions-section');
   const box = $('actions');
   box.innerHTML = '';
-  if (!cfg.actions?.length) { section.hidden = true; return; }
-  section.hidden = false;
+  if (!cfg.actions?.length) return;
   for (const a of cfg.actions) {
     const b = document.createElement('button');
     b.className = 'chip';
@@ -108,6 +134,7 @@ function renderToggles() {
 
 function renderAll() {
   renderPets();
+  renderButtons();
   renderSizes();
   renderRestoreOn();
   renderActions();
@@ -117,6 +144,9 @@ function renderAll() {
 // ------------------------------------------------------------------ wiring ---
 async function set(patch) {
   cfg.settings = await api.set(patch);
+  // Enabled flags live alongside the pet's own action list, so re-read rather
+  // than trying to patch the cached copy.
+  cfg = await api.get();
   renderAll();
 }
 
@@ -129,6 +159,17 @@ $('loginItem').addEventListener('change', async (e) => {
   renderToggles();
 });
 
+// Live-update the readout while dragging, but only commit on release so we
+// are not resizing the overlay on every pixel of slider travel.
+$('size').addEventListener('input', (e) => {
+  $('size-value').textContent = `${e.target.value}%`;
+});
+$('size').addEventListener('change', (e) => set({ sizeScale: Number(e.target.value) / 100 }));
+
+$('feed-fact').addEventListener('click', () => window.jarvis.feed('fact'));
+$('feed-news').addEventListener('click', () => window.jarvis.feed('news'));
+
+$('reset-pos').addEventListener('click', () => api.resetPosition());
 $('open-pets').addEventListener('click', () => api.openPets());
 
 $('add-pet').addEventListener('click', async () => {

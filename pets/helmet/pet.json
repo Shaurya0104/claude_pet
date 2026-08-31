@@ -10,23 +10,23 @@
   "animations": {
     "idle": {
       "row": 0,
-      "frames": 4,
-      "fps": 5
+      "frames": 1,
+      "fps": 1
     },
     "running": {
       "row": 1,
       "frames": 6,
-      "fps": 12
+      "fps": 5
     },
     "needs_input": {
       "row": 2,
       "frames": 4,
-      "fps": 6
+      "fps": 4
     },
     "ready": {
       "row": 3,
       "frames": 4,
-      "fps": 6
+      "fps": 4
     },
     "blocked": {
       "row": 4,
@@ -41,7 +41,7 @@
     "idle_look": {
       "row": 6,
       "frames": 6,
-      "fps": 4
+      "fps": 3
     },
     "idle_power": {
       "row": 7,
@@ -58,20 +58,35 @@
       "frames": 6,
       "fps": 12
     },
-    "salute": {
+    "arc_blast": {
       "row": 10,
+      "frames": 10,
+      "fps": 14
+    },
+    "scan": {
+      "row": 11,
       "frames": 6,
-      "fps": 8
+      "fps": 10
+    },
+    "boot": {
+      "row": 12,
+      "frames": 16,
+      "fps": 12
     }
   },
-  "variants": {
+  "flourishes": {
     "idle": [
-      "idle",
       "idle_scan",
       "idle_look",
       "idle_power"
     ]
   },
+  "settles": [
+    "needs_input",
+    "blocked",
+    "ready"
+  ],
+  "boot": "boot",
   "actions": {
     "poke": {
       "animation": "poke",
@@ -82,10 +97,20 @@
       "once": true,
       "label": "Repulsor"
     },
-    "salute": {
-      "animation": "salute",
+    "arc_blast": {
+      "animation": "arc_blast",
       "once": true,
-      "label": "Salute"
+      "label": "Arc Blast"
+    },
+    "scan": {
+      "animation": "scan",
+      "once": true,
+      "label": "Scan"
+    },
+    "boot": {
+      "animation": "boot",
+      "once": true,
+      "label": "Reboot"
     }
   },
   "bubbles": {

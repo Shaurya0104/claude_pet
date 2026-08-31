@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   onPet: (fn) => ipcRenderer.on('pet', (_e, pet) => fn(pet)),
   onSettings: (fn) => ipcRenderer.on('settings', (_e, s) => fn(s)),
   onAction: (fn) => ipcRenderer.on('action', (_e, key) => fn(key)),
+  onSpeak: (fn) => ipcRenderer.on('speak', (_e, msg) => fn(msg)),
+  openUrl: (url) => ipcRenderer.send('open-url', url),
+  feed: (kind) => ipcRenderer.invoke('feed', kind),
   ready: () => ipcRenderer.send('renderer-ready'),
   setIgnoreMouse: (ignore) => ipcRenderer.send('ignore-mouse', ignore),
   focus: (sessionId) => ipcRenderer.send('focus-session', sessionId),
@@ -19,6 +22,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   moveBy: (dx, dy) => ipcRenderer.send('move-by', { dx, dy }),
   savePosition: () => ipcRenderer.send('save-position'),
   setPanel: (open) => ipcRenderer.send('set-panel', open),
+  onPaused: (fn) => ipcRenderer.on('paused', (_e, p) => fn(p)),
+  onHoverEnd: (fn) => ipcRenderer.on('hover-end', () => fn()),
+  hoverWatch: (on) => ipcRenderer.send('hover-watch', on),
 
   // --- settings window
   settings: {
@@ -29,5 +35,6 @@ contextBridge.exposeInMainWorld('jarvis', {
     importPet: (opts) => ipcRenderer.invoke('settings:importPet', opts),
     action: (key) => ipcRenderer.invoke('settings:action', key),
     openPets: () => ipcRenderer.invoke('settings:openPets'),
+    resetPosition: () => ipcRenderer.invoke('settings:resetPosition'),
   },
 });

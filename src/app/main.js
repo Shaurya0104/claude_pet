@@ -14,6 +14,7 @@ const path = require('path');
 const { PetState } = require('../core/state');
 const { focusSession } = require('../core/focus');
 const { importPet, pngSize } = require('../core/import-pet');
+const { randomFact, randomNews } = require('../core/feeds');
 const { JARVIS_DIR, SETTINGS_FILE, PETS_DIR } = require('../core/paths');
 
 let win = null;          // the pet overlay
@@ -35,10 +36,15 @@ const DEFAULTS = {
   minimized: false,
   autoRestore: true,     // pop back up when a session needs you
   restoreOn: ['needs_input', 'blocked', 'ready'],
+  buttons: {},           // key -> false to hide; anything missing shows
 };
 let settings = { ...DEFAULTS };
 
-const SIZE_STEPS = [0.6, 0.8, 1, 1.25, 1.5, 2];
+const SIZE_STEPS = [0.2, 0.4, 0.6, 0.8, 1, 1.25, 1.5, 2];
+const SIZE_MIN = 0.2;
+const SIZE_MAX = 2;
+
+const clampSize = (v) => Math.max(SIZE_MIN, Math.min(SIZE_MAX, Number(v) || 1));
 
 // ------------------------------------------------------------- settings ---
 function loadSettings() {
@@ -56,6 +62,7 @@ function saveSettings() {
 
 /** Apply a settings patch and push the consequences everywhere. */
 function updateSettings(patch) {
+  if ('sizeScale' in patch) patch.sizeScale = clampSize(patch.sizeScale);
   const prevPet = settings.petId;
   Object.assign(settings, patch);
   saveSettings();
@@ -114,6 +121,7 @@ function listPets() {
             sheetHeight: size.h,
             frameWidth: m.frameWidth,
             frameHeight: m.frameHeight,
+            baseScale: m.scale ?? 2,
             rendering: m.rendering || 'pixelated',
             animations: Object.keys(m.animations || {}),
           };
@@ -127,6 +135,16 @@ function listPets() {
   }
 }
 
+/** Every button the hover bar could offer for the current pet. */
+function availableButtons() {
+  const list = Object.entries(pet?.actions || {})
+    .filter(([, a]) => a.label)
+    .map(([key, a]) => ({ key, label: a.label }));
+  list.push({ key: 'fact', label: 'Fact' });
+  list.push({ key: 'news', label: 'News' });
+  return list.map((b) => ({ ...b, enabled: settings.buttons?.[b.key] !== false }));
+}
+
 // ----------------------------------------------------------------- window ---
 /**
  * Window size is derived from the pet, so a big sprite gets room and a small
@@ -136,12 +154,70 @@ function sizes() {
   const p = effectivePet();
   const w = Math.round((p?.frameWidth ?? 48) * (p?.scale ?? 2));
   const h = Math.round((p?.frameHeight ?? 48) * (p?.scale ?? 2));
-  const width = Math.max(340, w + 56);
-  return { collapsed: [width, h + 130], expanded: [width, h + 400] };
+  // Two sizes only. Resizing on hover looked cheaper, but the resize moved the
+  // layout under the cursor, the next mousemove hit-tested empty space, and the
+  // bar hid itself again — so the buttons flickered and mostly never appeared.
+  // The resting window now always has room for them; they are shown and hidden
+  // in CSS with no layout change at all.
+  const wide = Math.max(384, w + 56);
+  return {
+    collapsed: [wide, h + 214],
+    expanded: [wide, h + 452],
+  };
+}
+
+/**
+ * Keep the pet somewhere you can actually reach it.
+ *
+ * Anchors are stored in absolute screen coordinates, so unplugging a monitor,
+ * changing resolution, or dragging into the gap between two displays can leave
+ * the window parked off-screen with no way to grab it. This pulls it back.
+ *
+ * `strict` fully contains the window in one display's work area — used on
+ * startup, on drop, and when the display layout changes. Non-strict only
+ * insists that a decent chunk stays visible, so dragging between monitors
+ * still feels free.
+ */
+function clampAnchor({ strict } = { strict: true }) {
+  if (!anchor) return;
+  const s = sizes();
+  const [w, h] = panelOpen ? s.expanded : s.collapsed;
+  const x = anchor.right - w;
+  const y = anchor.bottom - h;
+
+  let best = null;
+  let bestVisible = 0;
+  for (const d of screen.getAllDisplays()) {
+    const a = d.workArea;
+    const ix = Math.max(0, Math.min(x + w, a.x + a.width) - Math.max(x, a.x));
+    const iy = Math.max(0, Math.min(y + h, a.y + a.height) - Math.max(y, a.y));
+    const visible = ix * iy;
+    if (visible > bestVisible) { bestVisible = visible; best = d; }
+  }
+
+  const need = strict ? 0.98 : 0.25;
+  if (bestVisible >= w * h * need) return;          // enough of it is reachable
+
+  const a = (best || screen.getPrimaryDisplay()).workArea;
+  const nx = Math.min(Math.max(x, a.x), a.x + a.width - w);
+  const ny = Math.min(Math.max(y, a.y), a.y + a.height - h);
+  anchor = { right: nx + w, bottom: ny + h };
+}
+
+/** Park it back in the bottom-right of the display holding the cursor. */
+function resetPosition() {
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
+  const a = d.workArea;
+  anchor = { right: a.x + a.width - 24, bottom: a.y + a.height - 24 };
+  settings.anchor = anchor;
+  saveSettings();
+  applyBounds();
+  if (settings.minimized) updateSettings({ minimized: false });
 }
 
 function applyBounds() {
   if (!win || !anchor) return;
+  clampAnchor({ strict: true });
   const s = sizes();
   const [w, h] = panelOpen ? s.expanded : s.collapsed;
   win.setBounds({
@@ -156,6 +232,8 @@ function applyVisibility() {
   if (!win) return;
   if (settings.minimized) win.hide();
   else win.showInactive();
+  // A hidden window still runs its timers, so tell the renderer explicitly.
+  win.webContents.send('paused', !!settings.minimized);
 }
 
 function createWindow() {
@@ -290,6 +368,13 @@ function buildTray(snap) {
       click: () => updateSettings({ minimized: !settings.minimized }),
     },
     ...(actions.length ? [{ label: 'Do something', submenu: actions }] : []),
+    {
+      label: 'Tell me',
+      submenu: [
+        { label: 'A random fact', click: () => runFeed('fact') },
+        { label: "Today's news", click: () => runFeed('news') },
+      ],
+    },
     { type: 'separator' },
     {
       label: 'Pet',
@@ -322,6 +407,7 @@ function buildTray(snap) {
       click: (mi) => updateSettings({ notify: mi.checked }),
     },
     { type: 'separator' },
+    { label: 'Reset position', click: resetPosition },
     { label: 'Settings…', accelerator: 'CommandOrControl+,', click: openSettings },
     { label: 'Open pets folder', click: () => shell.openPath(PETS_DIR) },
     { type: 'separator' },
@@ -334,15 +420,42 @@ function buildTray(snap) {
 }
 
 // ---------------------------------------------------------- notifications ---
-const lastNotified = new Map(); // sessionId -> the state we last shouted about
+// sessionId -> the state we last shouted about. Persisted, because otherwise
+// every relaunch re-announced every session that was already waiting.
+const NOTIFIED_FILE = path.join(JARVIS_DIR, 'notified.json');
+let lastNotified = new Map();
+let notifySeeded = false;
+
+function loadNotified() {
+  try {
+    lastNotified = new Map(Object.entries(JSON.parse(fs.readFileSync(NOTIFIED_FILE, 'utf8'))));
+  } catch { lastNotified = new Map(); }
+}
+
+function saveNotified() {
+  try {
+    fs.mkdirSync(JARVIS_DIR, { recursive: true });
+    fs.writeFileSync(NOTIFIED_FILE, JSON.stringify(Object.fromEntries(lastNotified)));
+  } catch { /* not fatal */ }
+}
 
 function maybeNotify(snap) {
+  // The first snapshot is the world as we found it, not news. Record it and
+  // stay quiet, or opening the app shouts about everything already waiting.
+  if (!notifySeeded) {
+    notifySeeded = true;
+    for (const s of snap.sessions) lastNotified.set(s.sessionId, s.state);
+    saveNotified();
+    return;
+  }
   if (!settings.notify || !Notification.isSupported()) return;
 
+  let dirty = false;
   for (const s of snap.sessions) {
     const prev = lastNotified.get(s.sessionId);
-    if (prev === s.state) continue;
+    if (prev === s.state) continue;   // already told you about this exact state
     lastNotified.set(s.sessionId, s.state);
+    dirty = true;
 
     let title = null, body = null;
     if (s.state === 'needs_input') {
@@ -363,7 +476,10 @@ function maybeNotify(snap) {
   }
 
   const live = new Set(snap.sessions.map((s) => s.sessionId));
-  for (const id of lastNotified.keys()) if (!live.has(id)) lastNotified.delete(id);
+  for (const id of [...lastNotified.keys()]) {
+    if (!live.has(id)) { lastNotified.delete(id); dirty = true; }
+  }
+  if (dirty) saveNotified();
 }
 
 /**
@@ -375,6 +491,28 @@ function maybeRestore(snap, prevOverall) {
   if (snap.overall === prevOverall) return;
   if (!(settings.restoreOn || []).includes(snap.overall)) return;
   updateSettings({ minimized: false });
+}
+
+// ------------------------------------------------------------------- feeds ---
+let feedBusy = false;
+
+async function runFeed(kind) {
+  if (feedBusy) return null;
+  feedBusy = true;
+  if (!settings.minimized) win?.webContents.send('speak', { text: 'let me look…', ms: 2500 });
+  try {
+    const r = kind === 'news' ? await randomNews() : await randomFact();
+    win?.webContents.send('speak', {
+      text: r.text,
+      meta: r.meta,
+      url: r.url,
+      // Headlines are long; give them time to actually be read.
+      ms: Math.min(26000, 6000 + r.text.length * 90),
+    });
+    return r;
+  } finally {
+    feedBusy = false;
+  }
 }
 
 // ------------------------------------------------------------------ wiring ---
@@ -397,6 +535,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.whenReady().then(() => {
     loadSettings();
+    loadNotified();
     try {
       pet = loadPet(settings.petId);
     } catch {
@@ -406,7 +545,26 @@ if (!app.requestSingleInstanceLock()) {
     app.dock?.hide();                 // menubar accessory, no Dock icon
 
     state = new PetState().start();
+
+    // Record the world as we found it, without announcing any of it. Sessions
+    // already waiting when the app starts are not news, and re-announcing them
+    // on every relaunch was the repeat-notification problem.
+    for (const s of state.snapshot().sessions) lastNotified.set(s.sessionId, s.state);
+    notifySeeded = true;
+    saveNotified();
+
     createWindow();
+
+    // A monitor being unplugged or rearranged can strand the window in
+    // coordinates that no longer exist.
+    for (const ev of ['display-removed', 'display-added', 'display-metrics-changed']) {
+      screen.on(ev, () => {
+        clampAnchor({ strict: true });
+        applyBounds();
+        settings.anchor = anchor;
+        saveSettings();
+      });
+    }
     tray = new Tray(trayIcon('idle'));
     tray.on('click', () => tray.popUpContextMenu());
 
@@ -443,6 +601,12 @@ if (!app.requestSingleInstanceLock()) {
           pets: listPets().map((x) => `${x.id} (${x.sheetWidth}x${x.sheetHeight})`),
           overall: state.snapshot().overall,
           sessions: state.snapshot().sessions.length,
+          displays: screen.getAllDisplays().map((d) =>
+            `${d.workArea.width}x${d.workArea.height} @ ${d.workArea.x},${d.workArea.y}`),
+          anchor,
+          windowRect: win.getBounds(),
+          collapsed: sizes().collapsed,
+          expanded: sizes().expanded,
         }, null, 2));
         app.exit(0);
       }, 3000);
@@ -453,11 +617,21 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 // ---------------------------------------------------------------------- IPC ---
+let booted = false;
 ipcMain.on('renderer-ready', () => {
   win?.webContents.send('pet', effectivePet());
   win?.webContents.send('settings', settings);
   push();
+  // Play the pet's boot sequence once per launch, if it has one.
+  if (!booted && pet?.boot && !settings.minimized) {
+    booted = true;
+    setTimeout(() => win?.webContents.send('action', pet.boot), 350);
+  }
 });
+ipcMain.on('open-url', (_e, url) => {
+  if (typeof url === 'string' && /^https?:\/\//.test(url)) shell.openExternal(url);
+});
+ipcMain.handle('feed', (_e, kind) => runFeed(kind));
 ipcMain.on('ignore-mouse', (_e, ignore) => {
   win?.setIgnoreMouseEvents(!!ignore, { forward: true });
 });
@@ -472,12 +646,51 @@ ipcMain.on('move-by', (_e, { dx, dy }) => {
   if (!win || !anchor) return;
   anchor.right += dx;
   anchor.bottom += dy;
-  applyBounds();
+  // Loose clamp mid-drag: enough must stay visible to grab, but crossing
+  // between monitors should not feel like it is fighting you.
+  clampAnchor({ strict: false });
+  const s = sizes();
+  const [w, h] = panelOpen ? s.expanded : s.collapsed;
+  win.setBounds({ x: Math.round(anchor.right - w), y: Math.round(anchor.bottom - h), width: w, height: h });
 });
 ipcMain.on('save-position', () => {
+  clampAnchor({ strict: true });   // on drop, make sure all of it is on screen
+  applyBounds();
   settings.anchor = anchor;
   saveSettings();
 });
+ipcMain.on('reset-position', resetPosition);
+/**
+ * Watch the real cursor while the hover bar is up.
+ *
+ * The overlay is click-through, so once the pointer moves off it onto another
+ * app the window stops receiving mousemove entirely — the renderer never learns
+ * the cursor left, and the buttons stayed up forever. `mouseleave` is not
+ * reliable for a forwarded-event window either. So while the bar is showing,
+ * poll the actual screen cursor and tell the renderer when it is outside.
+ * Nothing runs when the bar is down.
+ */
+let hoverWatch = null;
+
+ipcMain.on('hover-watch', (_e, on) => {
+  clearInterval(hoverWatch);
+  hoverWatch = null;
+  if (!on || !win) return;
+  hoverWatch = setInterval(() => {
+    if (!win || win.isDestroyed()) { clearInterval(hoverWatch); hoverWatch = null; return; }
+    const b = win.getBounds();
+    const p = screen.getCursorScreenPoint();
+    const m = 12;   // a little slack, so a pixel of jitter at the edge is fine
+    const inside = p.x >= b.x - m && p.x <= b.x + b.width + m &&
+                   p.y >= b.y - m && p.y <= b.y + b.height + m;
+    if (!inside) {
+      clearInterval(hoverWatch);
+      hoverWatch = null;
+      win.webContents.send('hover-end');
+    }
+  }, 120);
+});
+
 ipcMain.on('set-panel', (_e, open) => {
   panelOpen = !!open;
   applyBounds();
@@ -489,10 +702,13 @@ ipcMain.handle('settings:get', () => ({
   settings,
   pets: listPets(),
   sizeSteps: SIZE_STEPS,
+  sizeMin: SIZE_MIN,
+  sizeMax: SIZE_MAX,
   packaged: app.isPackaged,
   loginItem: app.isPackaged ? app.getLoginItemSettings().openAtLogin : false,
   petsDir: PETS_DIR,
   actions: Object.entries(pet?.actions || {}).map(([k, a]) => ({ key: k, label: a.label || k })),
+  buttons: availableButtons(),
 }));
 ipcMain.handle('settings:set', (_e, patch) => { updateSettings(patch); return settings; });
 ipcMain.handle('settings:loginItem', (_e, on) => {
@@ -518,3 +734,4 @@ ipcMain.handle('settings:importPet', (_e, opts) => {
 });
 ipcMain.handle('settings:action', (_e, key) => { win?.webContents.send('action', key); });
 ipcMain.handle('settings:openPets', () => shell.openPath(PETS_DIR));
+ipcMain.handle('settings:resetPosition', () => { resetPosition(); });

@@ -12,6 +12,7 @@ const els = {
   badge: document.getElementById('badge'),
   bubble: document.getElementById('bubble'),
   bubbleText: document.getElementById('bubble-text'),
+  bubbleMeta: document.getElementById('bubble-meta'),
   actions: document.getElementById('actions'),
   panel: document.getElementById('panel'),
   list: document.getElementById('list'),
@@ -28,6 +29,10 @@ let snap = { overall: 'idle', sessions: [], counts: {} };
 let panelOpen = false;
 
 // ------------------------------------------------------------ animation ---
+const ctx = els.pet.getContext('2d');
+let sheet = null;          // decoded sprite sheet
+let dw = 0, dh = 0;        // css pixels the pet occupies
+
 let animName = 'idle';
 let anim = null;
 let frame = 0;
@@ -39,37 +44,36 @@ function animFor(name) {
   return pet?.animations?.[name] || pet?.animations?.idle || null;
 }
 
-/**
- * Which row should represent `state` right now. Pets can declare variants —
- * several takes on the same state — and we rotate through them so a long idle
- * does not loop identically forever.
- */
+/** Which row represents `state`. States map straight to their own row. */
 function pickRow(state) {
-  const variants = (pet?.variants?.[state] || []).filter((v) => pet?.animations?.[v]);
-  if (opts.randomIdle && opts.animate && variants.length > 1) {
-    return variants[Math.floor(Math.random() * variants.length)];
-  }
   return pet?.animations?.[state] ? state : 'idle';
 }
 
 function applyPet(p) {
   pet = p;
   if (!p) return;
-  const w = p.frameWidth * p.scale;
-  const h = p.frameHeight * p.scale;
-  els.wrap.style.width = `${w}px`;
-  els.wrap.style.height = `${h}px`;
-  els.pet.style.width = `${w}px`;
-  els.pet.style.height = `${h}px`;
-  els.pet.style.backgroundImage = `url("${p.sheetUrl}")`;
+  dw = Math.round(p.frameWidth * p.scale);
+  dh = Math.round(p.frameHeight * p.scale);
+
+  els.wrap.style.width = `${dw}px`;
+  els.wrap.style.height = `${dh}px`;
+  els.pet.style.width = `${dw}px`;
+  els.pet.style.height = `${dh}px`;
+
+  // Back the canvas at device resolution so it stays sharp on a Retina display.
+  const dpr = window.devicePixelRatio || 1;
+  els.pet.width = Math.round(dw * dpr);
+  els.pet.height = Math.round(dh * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   // Pixel art wants nearest-neighbour; a downscaled detailed sprite wants
   // smoothing, or its edges crawl. The pet decides.
-  els.pet.style.imageRendering = p.rendering || 'pixelated';
+  ctx.imageSmoothingEnabled = (p.rendering || 'pixelated') !== 'pixelated';
+  ctx.imageSmoothingQuality = 'high';
 
-  const cols = Math.max(...Object.values(p.animations).map((a) => a.frames));
-  const rows = Math.max(...Object.values(p.animations).map((a) => a.row)) + 1;
-  els.pet.style.backgroundSize =
-    `${p.frameWidth * cols * p.scale}px ${p.frameHeight * rows * p.scale}px`;
+  const img = new Image();
+  img.onload = () => { sheet = img; draw(); };
+  img.onerror = () => console.log(`failed to load sheet: ${p.sheetUrl}`);
+  img.src = p.sheetUrl;
 
   renderActions();
   playingAction = false;
@@ -79,6 +83,7 @@ function applyPet(p) {
 function setRow(name, once = false) {
   const a = animFor(name);
   if (!a) return;
+  if (once) frozen = false;
   animName = name;
   anim = a;
   playingAction = once;
@@ -88,10 +93,14 @@ function setRow(name, once = false) {
 }
 
 function draw() {
-  if (!pet || !anim) return;
-  const x = -frame * pet.frameWidth * pet.scale;
-  const y = -anim.row * pet.frameHeight * pet.scale;
-  els.pet.style.backgroundPosition = `${x}px ${y}px`;
+  if (!pet || !anim || !sheet) return;
+  ctx.clearRect(0, 0, dw, dh);
+  ctx.drawImage(
+    sheet,
+    frame * pet.frameWidth, anim.row * pet.frameHeight,   // source frame
+    pet.frameWidth, pet.frameHeight,
+    0, 0, dw, dh                                          // destination
+  );
 }
 
 /**
@@ -105,7 +114,8 @@ function draw() {
  */
 function schedule() {
   clearTimeout(timer);
-  if (document.hidden || !anim || anim.frames <= 1) return;
+  if (frozen && !playingAction) return;
+  if (paused || document.hidden || !anim || anim.frames <= 1) return;
   // "Animate off" freezes the state rows, but a one-shot you asked for still
   // plays — you triggered it deliberately.
   if (!opts.animate && !playingAction) return;
@@ -122,19 +132,85 @@ function step() {
   schedule();
 }
 
+let paused = false;
+api.onPaused((p) => {
+  paused = !!p;
+  if (paused) { clearTimeout(timer); clearInterval(nudgeCycle); clearTimeout(variantTimer); clearSettle(); }
+  else { schedule(); scheduleFlourish(); armSettle(snap.overall); }
+});
+
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearTimeout(timer);
   else schedule();
 });
 
-/** Re-pick an idle variant every so often, so it stays alive without cost. */
-function scheduleVariant() {
+/**
+ * Every few minutes, while genuinely idle, play one of the pet's livelier idle
+ * rows once and then settle back. Rotating them continuously made the pet look
+ * restless; a rare flourish reads as alive rather than fidgety.
+ */
+const FLOURISH_MIN_MS = 90000;    // 1.5 minutes
+const FLOURISH_MAX_MS = 240000;   // 4 minutes
+
+function scheduleFlourish() {
   clearTimeout(variantTimer);
-  if (!opts.animate || !opts.randomIdle) return;
+  if (paused || !opts.animate || !opts.randomIdle) return;
+  const wait = FLOURISH_MIN_MS + Math.random() * (FLOURISH_MAX_MS - FLOURISH_MIN_MS);
   variantTimer = setTimeout(() => {
-    if (!playingAction && snap.overall === 'idle') setRow(pickRow('idle'));
-    scheduleVariant();
-  }, 10000 + Math.random() * 14000);
+    const list = (pet?.flourishes?.[snap.overall] || []).filter((n) => pet?.animations?.[n]);
+    if (list.length && !playingAction && snap.overall === 'idle' && !paused) {
+      setRow(list[Math.floor(Math.random() * list.length)], true);
+    }
+    scheduleFlourish();
+  }, wait);
+}
+
+/**
+ * Alerts should be loud when they happen and quiet once you have had a chance
+ * to see them.
+ *
+ * A session can sit in `needs_input` for days. Animating that the whole time is
+ * exhausting to sit next to, but going silent loses the signal. So after a
+ * minute the sprite freezes on its first frame — the badge and the colour still
+ * say what is going on — and every so often it plays for a few seconds as a
+ * reminder.
+ */
+const SETTLE_AFTER_MS = 60000;
+const REMIND_EVERY_MS = 90000;
+const REMIND_FOR_MS = 4000;
+
+let settleTimer = null;
+let remindTimer = null;
+let frozen = false;
+
+function clearSettle() {
+  clearTimeout(settleTimer); settleTimer = null;
+  clearTimeout(remindTimer); remindTimer = null;
+  frozen = false;
+}
+
+function freeze() {
+  frozen = true;
+  clearTimeout(timer);
+  frame = 0;
+  draw();
+  remindTimer = setTimeout(remind, REMIND_EVERY_MS);
+}
+
+function remind() {
+  if (!frozen || paused) return;
+  frozen = false;
+  frame = 0;
+  schedule();
+  remindTimer = setTimeout(() => { if (!playingAction) freeze(); }, REMIND_FOR_MS);
+}
+
+/** Called whenever the overall state changes. */
+function armSettle(state) {
+  clearSettle();
+  if (!opts.animate) return;
+  if (!(pet?.settles || []).includes(state)) return;
+  settleTimer = setTimeout(() => { if (!playingAction) freeze(); }, SETTLE_AFTER_MS);
 }
 
 function playAction(key) {
@@ -145,14 +221,36 @@ function playAction(key) {
 
 // --------------------------------------------------------------- bubbles ---
 let bubbleTimer = null;
+let bubbleUrl = null;
 
-function say(text, ms = 4000) {
+/**
+ * @param {string} text
+ * @param {object} [o] { ms, meta, url } — a url makes the bubble clickable,
+ *                     and interactive so the click actually reaches us.
+ */
+function say(text, o = {}) {
   if (!text) return;
   els.bubbleText.textContent = text;
+  els.bubbleMeta.textContent = o.meta || '';
+  els.bubbleMeta.hidden = !o.meta;
+  bubbleUrl = o.url || null;
+  els.bubble.classList.toggle('linked', !!bubbleUrl);
+  els.bubble.classList.toggle('interactive', !!bubbleUrl);
   els.bubble.hidden = false;
   clearTimeout(bubbleTimer);
-  bubbleTimer = setTimeout(() => { els.bubble.hidden = true; }, ms);
+  bubbleTimer = setTimeout(hideBubble, o.ms || 4000);
 }
+
+function hideBubble() {
+  els.bubble.hidden = true;
+  els.bubble.classList.remove('interactive', 'linked');
+  bubbleUrl = null;
+}
+
+els.bubble.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (bubbleUrl) { api.openUrl(bubbleUrl); hideBubble(); }
+});
 
 function lineFor(state) {
   const lines = pet?.bubbles?.[state];
@@ -161,17 +259,49 @@ function lineFor(state) {
 }
 
 // --------------------------------------------------------------- actions ---
+function addButton(label, onClick, title) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  if (title) b.title = title;
+  b.addEventListener('click', (e) => { e.stopPropagation(); onClick(b); });
+  els.actions.appendChild(b);
+  return b;
+}
+
+/** Buttons you have switched off in Settings never get built. */
+function wanted(key) {
+  return opts.buttons?.[key] !== false;
+}
+
 function renderActions() {
   els.actions.innerHTML = '';
-  const entries = Object.entries(pet?.actions || {}).filter(([, a]) => a.label);
-  if (!entries.length) { els.actions.hidden = true; return; }
-  for (const [key, a] of entries) {
-    const b = document.createElement('button');
-    b.textContent = a.label;
-    b.addEventListener('click', (e) => { e.stopPropagation(); playAction(key); });
-    els.actions.appendChild(b);
+
+  // The pet's own one-shot animations, whichever of them carry a label.
+  for (const [key, a] of Object.entries(pet?.actions || {})) {
+    if (a.label && wanted(key)) addButton(a.label, () => playAction(key));
   }
-  els.actions.hidden = !panelOpen;
+
+  // Not animations: these go and fetch something for the pet to say.
+  if (wanted('fact')) {
+    addButton('Fact', async (b) => {
+      b.disabled = true;
+      try { await api.feed('fact'); } finally { b.disabled = false; }
+    }, 'A random fact, from a different source each time');
+  }
+  if (wanted('news')) {
+    addButton('News', async (b) => {
+      b.disabled = true;
+      try { await api.feed('news'); } finally { b.disabled = false; }
+    }, 'A headline, from a different outlet each time');
+  }
+
+  // Keep the grid tidy when there are three or fewer.
+  const n = els.actions.childElementCount;
+  els.actions.style.gridTemplateColumns = `repeat(${Math.min(3, Math.max(1, n))}, 1fr)`;
+  els.actions.style.width = n <= 3 ? 'auto' : '268px';
+
+  els.actions.hidden = !hovering || n === 0;
+  console.log(`actions: ${n} [${[...els.actions.children].map((b) => b.textContent).join(', ')}]`);
 }
 
 // ----------------------------------------------------------------- panel ---
@@ -247,8 +377,8 @@ function setPanel(open) {
   panelOpen = open;
   api.setPanel(open);
   els.panel.hidden = !open;
-  els.actions.hidden = !open || !els.actions.childElementCount;
-  if (open) { renderPanel(); els.bubble.hidden = true; }
+  els.actions.hidden = !hovering || !els.actions.childElementCount;
+  if (open) { renderPanel(); hideBubble(); }
 }
 
 // -------------------------------------------------------------- hit-test ---
@@ -265,13 +395,65 @@ function setIgnore(next) {
 
 function hitTest(x, y) {
   const el = document.elementFromPoint(x, y);
-  setIgnore(!(el && el.closest('.interactive')));
+  const over = !!(el && el.closest('.interactive'));
+  setIgnore(!over);
+  // The hover zone is deliberately wider than the interactive elements, so
+  // travelling between the pet and the buttons does not drop the hover.
+  const stage = document.getElementById('stage').getBoundingClientRect();
+  setHover(over || (x >= stage.left - 8 && x <= stage.right + 8 &&
+                    y >= stage.top - 8 && y <= stage.bottom + 8));
 }
 
 document.addEventListener('mousemove', (e) => {
   if (!dragging) hitTest(e.clientX, e.clientY);
 });
-document.addEventListener('mouseleave', () => setIgnore(true));
+document.addEventListener('mouseleave', () => { setIgnore(true); setHover(false); });
+
+// --------------------------------------------------------------- hovering ---
+// The action buttons sit above the pet and appear on hover, so they are
+// reachable without opening the session panel.
+//
+// This used to ask the main process to grow the window on hover. That fed back
+// into the hit-test: the resize moved the layout under a stationary cursor, the
+// next mousemove landed on empty space, and the bar hid itself again. The
+// window is now always big enough and hovering only toggles a class.
+let hovering = false;
+let hoverOff = null;
+
+function setHover(on) {
+  if (on) {
+    clearTimeout(hoverOff);
+    hoverOff = null;
+    if (hovering) return;
+    hovering = true;
+    showActions(true);
+    api.hoverWatch(true);      // main watches the real cursor from here
+    return;
+  }
+  if (!hovering || hoverOff) return;
+  // Leaving is delayed: the pet and the buttons are separate boxes with a gap
+  // between them, and the cursor crosses that gap on the way to a button.
+  hoverOff = setTimeout(endHover, 400);
+}
+
+function endHover() {
+  clearTimeout(hoverOff);
+  hoverOff = null;
+  if (!hovering) return;
+  hovering = false;
+  showActions(false);
+  api.hoverWatch(false);
+}
+
+// The overlay stops receiving mousemove the moment the cursor moves onto
+// another window, so the main process tells us when it has really left.
+api.onHoverEnd(endHover);
+
+// The bar is tied to hovering the pet and nothing else — opening the session
+// panel no longer pins it open.
+function showActions(on) {
+  els.actions.hidden = !(on && els.actions.childElementCount);
+}
 
 // ---------------------------------------------------------------- dragging ---
 let dragging = false;
@@ -342,7 +524,7 @@ function setAlert(on) {
   clearInterval(nudgeCycle);
   clearTimeout(nudgeStop);
   els.wrap.classList.remove('nudging');
-  if (!on || !opts.animate) return;
+  if (!on || !opts.animate || paused) return;
   burst();
   nudgeCycle = setInterval(burst, NUDGE_EVERY_MS);
 }
@@ -352,13 +534,16 @@ let prevOverall = 'idle';
 
 api.onPet(applyPet);
 api.onAction(playAction);
+api.onSpeak((m) => say(m.text, m));
 
 api.onSettings((s) => {
   const wasAnimate = opts.animate;
+  const prevButtons = JSON.stringify(opts.buttons || {});
   opts = { ...opts, ...s };
-  if (!opts.animate) { clearTimeout(timer); frame = 0; draw(); setAlert(false); }
-  else if (!wasAnimate) { setRow(pickRow(snap.overall)); setAlert(alertingState()); }
-  scheduleVariant();
+  if (JSON.stringify(opts.buttons || {}) !== prevButtons) renderActions();
+  if (!opts.animate) { clearSettle(); clearTimeout(timer); frame = 0; draw(); setAlert(false); }
+  else if (!wasAnimate) { setRow(pickRow(snap.overall)); armSettle(snap.overall); setAlert(alertingState()); }
+  scheduleFlourish();
 });
 
 function alertingState() {
@@ -368,6 +553,7 @@ function alertingState() {
 api.onState((s) => {
   const changed = s.overall !== prevOverall;
   snap = s;
+  if (changed) armSettle(s.overall);
   if (changed && !playingAction) setRow(pickRow(s.overall));
   renderBadge();
   setAlert(alertingState());
@@ -375,10 +561,10 @@ api.onState((s) => {
 
   if (changed && s.overall !== 'idle' && !panelOpen) {
     const blocking = s.sessions.find((x) => x.state === s.overall);
-    say(blocking?.reason || lineFor(s.overall) || null);
+    say(blocking?.reason || lineFor(s.overall) || null, { ms: 4000 });
   }
   prevOverall = s.overall;
 });
 
-scheduleVariant();
+scheduleFlourish();
 api.ready();
