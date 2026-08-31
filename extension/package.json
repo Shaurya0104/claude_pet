@@ -1,0 +1,16 @@
+{
+  "name": "jarvis-focus",
+  "displayName": "Jarvis Focus",
+  "description": "Lets the Jarvis desktop pet focus the exact integrated terminal a Claude Code session is running in.",
+  "publisher": "jarvis",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "jarvis.listTerminals", "title": "Jarvis: List Terminals and their PIDs" }
+    ]
+  }
+}

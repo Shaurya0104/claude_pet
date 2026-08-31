@@ -1,0 +1,162 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%; height: 100%;
+  background: transparent;          /* the window is a hole in the screen */
+  overflow: hidden;
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: #e8eef2;
+  user-select: none;
+  cursor: default;
+}
+
+/* Everything is bottom-right anchored so the pet sits in the corner and the
+   panel grows upward from it. */
+#stage {
+  position: absolute;
+  right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px;
+}
+
+/* ------------------------------------------------------------------ pet --- */
+#pet-wrap {
+  position: relative;
+  width: 96px; height: 96px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+#pet {
+  width: 96px; height: 96px;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;       /* keep the pixel art crisp */
+  transition: transform .12s ease;
+}
+
+#pet-wrap:hover #pet { transform: translateY(-2px) scale(1.04); }
+#pet-wrap.dragging { cursor: grabbing; }
+
+#badge {
+  position: absolute;
+  top: 4px; right: 2px;
+  min-width: 18px; height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #ff5c5c;
+  color: #fff;
+  font-size: 11px; font-weight: 700;
+  line-height: 18px; text-align: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,.4);
+}
+#badge.state-ready   { background: #34c77b; }
+#badge.state-blocked { background: #ff5c5c; }
+#badge.state-needs_input { background: #ffb020; color: #2a1b00; }
+
+/* Pull attention when a session is blocking on you.
+   Deliberately finite: a CSS transform animation composites the whole
+   transparent window at 60fps, and leaving one running forever cost ~7% CPU
+   on its own. The renderer re-triggers this in bursts instead. */
+#pet-wrap.nudging #pet { animation: nudge .9s ease-in-out 3; }
+@keyframes nudge {
+  0%, 100% { transform: translateY(0)   rotate(0deg); }
+  25%      { transform: translateY(-4px) rotate(-4deg); }
+  75%      { transform: translateY(-4px) rotate(4deg); }
+}
+
+/* --------------------------------------------------------------- bubble --- */
+#bubble {
+  position: relative;
+  max-width: 240px;
+  padding: 7px 11px;
+  border-radius: 12px;
+  background: rgba(22, 28, 34, .92);
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+  font-size: 12px;
+  animation: pop .18s ease;
+}
+#bubble::after {
+  content: '';
+  position: absolute;
+  right: 26px; bottom: -5px;
+  width: 10px; height: 10px;
+  background: rgba(22, 28, 34, .92);
+  border-right: 1px solid rgba(255,255,255,.10);
+  border-bottom: 1px solid rgba(255,255,255,.10);
+  transform: rotate(45deg);
+}
+@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.96); } }
+
+/* ---------------------------------------------------------------- panel --- */
+#panel {
+  width: 320px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: rgba(18, 23, 28, .94);
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 14px 40px rgba(0,0,0,.5);
+  overflow: hidden;
+  animation: pop .16s ease;
+}
+
+#panel header, #panel footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 12px;
+  font-size: 11px;
+  color: #93a4b1;
+}
+#panel header { border-bottom: 1px solid rgba(255,255,255,.07); font-weight: 600; color: #cdd9e2; }
+#panel footer { border-top: 1px solid rgba(255,255,255,.07); }
+
+#panel button {
+  background: rgba(255,255,255,.07);
+  border: 0; border-radius: 6px;
+  color: #b9c7d2;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+#panel button:hover { background: rgba(255,255,255,.14); color: #fff; }
+
+#list { list-style: none; overflow-y: auto; flex: 1; }
+#list::-webkit-scrollbar { width: 8px; }
+#list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 4px; }
+
+#list li {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+#list li:hover { background: rgba(255,255,255,.06); }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot.needs_input { background: #ffb020; box-shadow: 0 0 0 3px rgba(255,176,32,.18); }
+.dot.blocked     { background: #ff5c5c; box-shadow: 0 0 0 3px rgba(255,92,92,.18); }
+.dot.ready       { background: #34c77b; box-shadow: 0 0 0 3px rgba(52,199,123,.18); }
+.dot.running     { background: #4fc3f7; animation: pulse 1.4s ease-in-out infinite; }
+.dot.idle        { background: #56646f; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.meta { flex: 1; min-width: 0; }
+.name {
+  font-size: 12px; color: #e8eef2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sub {
+  font-size: 10.5px; color: #7d8d99;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+li.needs_input .name, li.blocked .name { font-weight: 600; }
+li.needs_input { border-left-color: #ffb020; }
+li.blocked     { border-left-color: #ff5c5c; }
+li.ready       { border-left-color: #34c77b; }
+
+.age { font-size: 10.5px; color: #6b7a85; flex: none; }
+#empty { padding: 20px 12px; text-align: center; color: #6b7a85; font-size: 11.5px; }

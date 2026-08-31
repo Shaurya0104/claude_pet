@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline' 'self'; script-src 'self';">
+  <title>Jarvis</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="stage">
+    <!-- session list, toggled by clicking the pet -->
+    <section id="panel" class="interactive" hidden>
+      <header>
+        <span id="panel-title">Sessions</span>
+        <button id="seen-all" title="Mark all as seen">seen</button>
+      </header>
+      <ul id="list"></ul>
+      <footer>
+        <span id="hint">click a session to jump to its terminal</span>
+        <button id="quit" title="Quit Jarvis">quit</button>
+      </footer>
+    </section>
+
+    <div id="bubble" hidden><span id="bubble-text"></span></div>
+
+    <div id="pet-wrap" class="interactive">
+      <div id="badge" hidden></div>
+      <div id="pet"></div>
+    </div>
+  </div>
+  <script src="pet.js"></script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+{
+  "id": "helmet",
+  "name": "Helmet",
+  "sheet": "helmet.png",
+  "source": "colourised from vecteezy_detailed-robot-warrior-helmet-design-simple-line-art_67835659.jpg by tools/make-helmet.js",
+  "frameWidth": 224,
+  "frameHeight": 288,
+  "scale": 0.5,
+  "rendering": "auto",
+  "animations": {
+    "idle": {
+      "row": 0,
+      "frames": 4,
+      "fps": 5
+    },
+    "running": {
+      "row": 1,
+      "frames": 6,
+      "fps": 12
+    },
+    "needs_input": {
+      "row": 2,
+      "frames": 4,
+      "fps": 6
+    },
+    "ready": {
+      "row": 3,
+      "frames": 4,
+      "fps": 6
+    },
+    "blocked": {
+      "row": 4,
+      "frames": 4,
+      "fps": 4
+    }
+  },
+  "bubbles": {
+    "needs_input": [
+      "sir, I need you",
+      "awaiting input",
+      "you are needed"
+    ],
+    "ready": [
+      "task complete",
+      "ready for review",
+      "done, sir"
+    ],
+    "blocked": [
+      "systems offline",
+      "power failure",
+      "I'm stuck"
+    ],
+    "running": [
+      "working on it",
+      "processing",
+      "on it, sir"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "claude-pet",
+  "version": "0.1.0",
+  "description": "Jarvis \u2014 a desktop pet that shows the live state of every Claude Code session",
+  "private": true,
+  "main": "src/app/main.js",
+  "type": "commonjs",
+  "bin": {
+    "jarvis": "bin/jarvis"
+  },
+  "scripts": {
+    "start": "electron .",
+    "status": "node src/cli.js status",
+    "watch": "node src/cli.js watch",
+    "sprite": "node tools/make-sprite.js",
+    "install-plugin": "node tools/install.js",
+    "uninstall-plugin": "node tools/install.js --remove",
+    "toggle": "node tools/toggle.js",
+    "build": "node tools/build-app.js",
+    "icon": "node tools/make-icon.js",
+    "install-extension": "node tools/install-extension.js",
+    "uninstall-extension": "node tools/install-extension.js --remove",
+    "add-pet": "node tools/add-pet.js"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^33.2.0"
+  }
+}
