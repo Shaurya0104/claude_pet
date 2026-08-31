@@ -13,14 +13,22 @@
     <section id="panel" class="interactive" hidden>
       <header>
         <span id="panel-title">Sessions</span>
-        <button id="seen-all" title="Mark all as seen">seen</button>
+        <span class="titlebar-actions">
+          <button id="seen-all" title="Mark all as seen">seen</button>
+          <button id="settings" title="Open settings">settings</button>
+        </span>
       </header>
       <ul id="list"></ul>
       <footer>
         <span id="hint">click a session to jump to its terminal</span>
-        <button id="quit" title="Quit Jarvis">quit</button>
+        <span class="titlebar-actions">
+          <button id="hide" title="Hide the pet (menubar keeps running)">hide</button>
+          <button id="quit" title="Quit Jarvis">quit</button>
+        </span>
       </footer>
     </section>
+
+    <div id="actions" class="interactive" hidden></div>
 
     <div id="bubble" hidden><span id="bubble-text"></span></div>
 

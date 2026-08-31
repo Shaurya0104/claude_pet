@@ -32,6 +32,60 @@
       "row": 4,
       "frames": 4,
       "fps": 4
+    },
+    "idle_scan": {
+      "row": 5,
+      "frames": 6,
+      "fps": 8
+    },
+    "idle_look": {
+      "row": 6,
+      "frames": 6,
+      "fps": 4
+    },
+    "idle_power": {
+      "row": 7,
+      "frames": 6,
+      "fps": 6
+    },
+    "poke": {
+      "row": 8,
+      "frames": 5,
+      "fps": 14
+    },
+    "ping": {
+      "row": 9,
+      "frames": 6,
+      "fps": 12
+    },
+    "salute": {
+      "row": 10,
+      "frames": 6,
+      "fps": 8
+    }
+  },
+  "variants": {
+    "idle": [
+      "idle",
+      "idle_scan",
+      "idle_look",
+      "idle_power"
+    ]
+  },
+  "actions": {
+    "poke": {
+      "animation": "poke",
+      "once": true
+    },
+    "ping": {
+      "animation": "ping",
+      "once": true,
+      "label": "Repulsor"
+    },
+    "salute": {
+      "animation": "salute",
+      "once": true,
+      "label": "Salute"
     }
   },
   "bubbles": {

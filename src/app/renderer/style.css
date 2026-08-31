@@ -92,6 +92,11 @@ html, body {
 @keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.96); } }
 
 /* ---------------------------------------------------------------- panel --- */
+/* The bug this fixes: an id rule with `display: flex` outranks the browser's
+   own `[hidden] { display: none }`, so the panel was never actually hidden —
+   it was only ever clipped outside a window too small to show it. */
+#panel[hidden], #bubble[hidden], #actions[hidden] { display: none !important; }
+
 #panel {
   width: 320px;
   max-height: 320px;
@@ -104,6 +109,30 @@ html, body {
   overflow: hidden;
   animation: pop .16s ease;
 }
+
+#panel .titlebar-actions { display: flex; gap: 6px; }
+
+/* Buttons that make the pet do something, above the panel. */
+#actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(18, 23, 28, .94);
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 8px 24px rgba(0,0,0,.42);
+  animation: pop .16s ease;
+}
+#actions button {
+  background: rgba(255,255,255,.07);
+  border: 0; border-radius: 7px;
+  color: #cdd9e2;
+  padding: 5px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#actions button:hover { background: rgba(255,255,255,.16); color: #fff; }
 
 #panel header, #panel footer {
   display: flex; align-items: center; justify-content: space-between;

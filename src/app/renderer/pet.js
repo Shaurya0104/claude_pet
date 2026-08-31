@@ -12,24 +12,49 @@ const els = {
   badge: document.getElementById('badge'),
   bubble: document.getElementById('bubble'),
   bubbleText: document.getElementById('bubble-text'),
+  actions: document.getElementById('actions'),
   panel: document.getElementById('panel'),
   list: document.getElementById('list'),
   title: document.getElementById('panel-title'),
   seenAll: document.getElementById('seen-all'),
+  settings: document.getElementById('settings'),
+  hide: document.getElementById('hide'),
   quit: document.getElementById('quit'),
 };
 
 let pet = null;
+let opts = { animate: true, randomIdle: true };
 let snap = { overall: 'idle', sessions: [], counts: {} };
 let panelOpen = false;
 
 // ------------------------------------------------------------ animation ---
-let anim = { row: 0, frames: 1, fps: 4 };
+let animName = 'idle';
+let anim = null;
 let frame = 0;
 let timer = null;
+let playingAction = false;   // a one-shot that returns to the state when done
+let variantTimer = null;
+
+function animFor(name) {
+  return pet?.animations?.[name] || pet?.animations?.idle || null;
+}
+
+/**
+ * Which row should represent `state` right now. Pets can declare variants —
+ * several takes on the same state — and we rotate through them so a long idle
+ * does not loop identically forever.
+ */
+function pickRow(state) {
+  const variants = (pet?.variants?.[state] || []).filter((v) => pet?.animations?.[v]);
+  if (opts.randomIdle && opts.animate && variants.length > 1) {
+    return variants[Math.floor(Math.random() * variants.length)];
+  }
+  return pet?.animations?.[state] ? state : 'idle';
+}
 
 function applyPet(p) {
   pet = p;
+  if (!p) return;
   const w = p.frameWidth * p.scale;
   const h = p.frameHeight * p.scale;
   els.wrap.style.width = `${w}px`;
@@ -40,25 +65,30 @@ function applyPet(p) {
   // Pixel art wants nearest-neighbour; a downscaled detailed sprite wants
   // smoothing, or its edges crawl. The pet decides.
   els.pet.style.imageRendering = p.rendering || 'pixelated';
+
   const cols = Math.max(...Object.values(p.animations).map((a) => a.frames));
-  const rows = Object.keys(p.animations).length;
+  const rows = Math.max(...Object.values(p.animations).map((a) => a.row)) + 1;
   els.pet.style.backgroundSize =
     `${p.frameWidth * cols * p.scale}px ${p.frameHeight * rows * p.scale}px`;
-  setState(snap.overall);
+
+  renderActions();
+  playingAction = false;
+  setRow(pickRow(snap.overall));
 }
 
-function setState(state) {
-  if (!pet) return;
-  const a = pet.animations[state] || pet.animations.idle;
-  if (a === anim) return;
+function setRow(name, once = false) {
+  const a = animFor(name);
+  if (!a) return;
+  animName = name;
   anim = a;
+  playingAction = once;
   frame = 0;
   draw();
   schedule();
 }
 
 function draw() {
-  if (!pet) return;
+  if (!pet || !anim) return;
   const x = -frame * pet.frameWidth * pet.scale;
   const y = -anim.row * pet.frameHeight * pet.scale;
   els.pet.style.backgroundPosition = `${x}px ${y}px`;
@@ -70,23 +100,48 @@ function draw() {
  *
  * rAF fires 60 times a second no matter what the animation needs. Idle runs at
  * 4fps, so 56 of every 60 wakeups did nothing but keep the renderer's main
- * thread and the compositor hot. A single-frame animation schedules nothing at
- * all.
+ * thread and the compositor hot. A single-frame animation, a paused one, or a
+ * hidden window schedules nothing at all.
  */
 function schedule() {
   clearTimeout(timer);
   if (document.hidden || !anim || anim.frames <= 1) return;
-  timer = setTimeout(() => {
-    frame = (frame + 1) % anim.frames;
-    draw();
-    schedule();
-  }, 1000 / (anim.fps || 6));
+  // "Animate off" freezes the state rows, but a one-shot you asked for still
+  // plays — you triggered it deliberately.
+  if (!opts.animate && !playingAction) return;
+  timer = setTimeout(step, 1000 / (anim.fps || 6));
+}
+
+function step() {
+  frame++;
+  if (frame >= anim.frames) {
+    if (playingAction) { playingAction = false; setRow(pickRow(snap.overall)); return; }
+    frame = 0;
+  }
+  draw();
+  schedule();
 }
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearTimeout(timer);
   else schedule();
 });
+
+/** Re-pick an idle variant every so often, so it stays alive without cost. */
+function scheduleVariant() {
+  clearTimeout(variantTimer);
+  if (!opts.animate || !opts.randomIdle) return;
+  variantTimer = setTimeout(() => {
+    if (!playingAction && snap.overall === 'idle') setRow(pickRow('idle'));
+    scheduleVariant();
+  }, 10000 + Math.random() * 14000);
+}
+
+function playAction(key) {
+  const a = pet?.actions?.[key];
+  if (!a) return;
+  setRow(a.animation || key, a.once !== false);
+}
 
 // --------------------------------------------------------------- bubbles ---
 let bubbleTimer = null;
@@ -103,6 +158,20 @@ function lineFor(state) {
   const lines = pet?.bubbles?.[state];
   if (!lines || !lines.length) return null;
   return lines[Math.floor(Math.random() * lines.length)];
+}
+
+// --------------------------------------------------------------- actions ---
+function renderActions() {
+  els.actions.innerHTML = '';
+  const entries = Object.entries(pet?.actions || {}).filter(([, a]) => a.label);
+  if (!entries.length) { els.actions.hidden = true; return; }
+  for (const [key, a] of entries) {
+    const b = document.createElement('button');
+    b.textContent = a.label;
+    b.addEventListener('click', (e) => { e.stopPropagation(); playAction(key); });
+    els.actions.appendChild(b);
+  }
+  els.actions.hidden = !panelOpen;
 }
 
 // ----------------------------------------------------------------- panel ---
@@ -168,19 +237,24 @@ function renderPanel() {
 function renderBadge() {
   const c = snap.counts || {};
   const n = (c.needs_input || 0) + (c.blocked || 0) + (c.ready || 0);
-  if (!n) {
-    els.badge.hidden = true;
-    return;
-  }
+  if (!n) { els.badge.hidden = true; return; }
   els.badge.hidden = false;
   els.badge.textContent = String(n);
   els.badge.className = `state-${snap.overall}`;
 }
 
+function setPanel(open) {
+  panelOpen = open;
+  api.setPanel(open);
+  els.panel.hidden = !open;
+  els.actions.hidden = !open || !els.actions.childElementCount;
+  if (open) { renderPanel(); els.bubble.hidden = true; }
+}
+
 // -------------------------------------------------------------- hit-test ---
 // The window ignores mouse events (so clicks reach whatever is underneath),
 // but `forward: true` keeps mousemove flowing here. We flip the flag off only
-// while the cursor is genuinely over the pet or the panel.
+// while the cursor is genuinely over the pet or a panel.
 let ignoring = true;
 
 function setIgnore(next) {
@@ -189,10 +263,13 @@ function setIgnore(next) {
   api.setIgnoreMouse(next);
 }
 
-document.addEventListener('mousemove', (e) => {
-  if (dragging) return;
-  const el = document.elementFromPoint(e.clientX, e.clientY);
+function hitTest(x, y) {
+  const el = document.elementFromPoint(x, y);
   setIgnore(!(el && el.closest('.interactive')));
+}
+
+document.addEventListener('mousemove', (e) => {
+  if (!dragging) hitTest(e.clientX, e.clientY);
 });
 document.addEventListener('mouseleave', () => setIgnore(true));
 
@@ -222,19 +299,22 @@ window.addEventListener('mousemove', (e) => {
   api.moveBy(dx, dy);
 });
 
-window.addEventListener('mouseup', () => {
+window.addEventListener('mouseup', (e) => {
   if (!dragging) return;
   dragging = false;
   els.wrap.classList.remove('dragging');
   if (moved) { api.savePosition(); return; }
-  // A click, not a drag: toggle the session panel.
-  panelOpen = !panelOpen;
-  api.setPanel(panelOpen);
-  els.panel.hidden = !panelOpen;
-  if (panelOpen) { renderPanel(); els.bubble.hidden = true; }
+  // A click, not a drag: toggle the session panel and give a little reaction.
+  setPanel(!panelOpen);
+  if (pet?.actions?.poke) playAction('poke');
+  // The window just resized under the cursor, so re-test rather than wait for
+  // the next mousemove — otherwise the click-through state goes stale.
+  requestAnimationFrame(() => hitTest(e.clientX, e.clientY));
 });
 
 els.seenAll.addEventListener('click', (e) => { e.stopPropagation(); api.acknowledgeAll(); });
+els.settings.addEventListener('click', (e) => { e.stopPropagation(); api.openSettings(); });
+els.hide.addEventListener('click', (e) => { e.stopPropagation(); setPanel(false); api.minimize(); });
 els.quit.addEventListener('click', (e) => { e.stopPropagation(); api.quit(); });
 
 // ------------------------------------------------------------------ alert ---
@@ -262,7 +342,7 @@ function setAlert(on) {
   clearInterval(nudgeCycle);
   clearTimeout(nudgeStop);
   els.wrap.classList.remove('nudging');
-  if (!on) return;
+  if (!on || !opts.animate) return;
   burst();
   nudgeCycle = setInterval(burst, NUDGE_EVERY_MS);
 }
@@ -271,19 +351,34 @@ function setAlert(on) {
 let prevOverall = 'idle';
 
 api.onPet(applyPet);
+api.onAction(playAction);
+
+api.onSettings((s) => {
+  const wasAnimate = opts.animate;
+  opts = { ...opts, ...s };
+  if (!opts.animate) { clearTimeout(timer); frame = 0; draw(); setAlert(false); }
+  else if (!wasAnimate) { setRow(pickRow(snap.overall)); setAlert(alertingState()); }
+  scheduleVariant();
+});
+
+function alertingState() {
+  return snap.overall === 'needs_input' || snap.overall === 'blocked';
+}
 
 api.onState((s) => {
+  const changed = s.overall !== prevOverall;
   snap = s;
-  setState(s.overall);
+  if (changed && !playingAction) setRow(pickRow(s.overall));
   renderBadge();
-  setAlert(s.overall === 'needs_input' || s.overall === 'blocked');
+  setAlert(alertingState());
   if (panelOpen) renderPanel();
 
-  if (s.overall !== prevOverall && s.overall !== 'idle' && !panelOpen) {
+  if (changed && s.overall !== 'idle' && !panelOpen) {
     const blocking = s.sessions.find((x) => x.state === s.overall);
     say(blocking?.reason || lineFor(s.overall) || null);
   }
   prevOverall = s.overall;
 });
 
+scheduleVariant();
 api.ready();

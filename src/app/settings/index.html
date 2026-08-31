@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline' 'self'; script-src 'self';">
+  <title>Jarvis Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <header id="titlebar"><h1>Jarvis</h1><span id="status"></span></header>
+
+  <main>
+    <section>
+      <h2>Pet</h2>
+      <div id="pets" class="grid"></div>
+      <div class="row">
+        <button id="open-pets" class="ghost">Open pets folder</button>
+        <button id="add-pet" class="ghost">Add your own…</button>
+      </div>
+    </section>
+
+    <section id="import" hidden>
+      <h2>Add a sprite sheet</h2>
+      <p class="hint" id="import-file">No file chosen</p>
+      <div class="fields">
+        <label>Columns <input id="cols" type="number" min="1" value="4"></label>
+        <label>Rows <input id="rows" type="number" min="1" value="5"></label>
+        <label>Name <input id="petname" type="text" placeholder="from filename"></label>
+        <label>Scale <input id="petscale" type="number" min="0.25" step="0.25" placeholder="auto"></label>
+      </div>
+      <p class="hint">
+        One row per state, frames left to right: idle, running, needs&nbsp;input,
+        ready, blocked. Fewer rows is fine — the extras reuse row&nbsp;0.
+      </p>
+      <div class="row">
+        <button id="do-import">Import</button>
+        <button id="cancel-import" class="ghost">Cancel</button>
+      </div>
+      <p class="hint error" id="import-error" hidden></p>
+    </section>
+
+    <section>
+      <h2>Size</h2>
+      <div id="sizes" class="chips"></div>
+    </section>
+
+    <section>
+      <h2>Behaviour</h2>
+      <label class="toggle"><input type="checkbox" id="animate">
+        <span><b>Animate</b><i>Turn off to freeze the pet on a single frame.</i></span></label>
+      <label class="toggle"><input type="checkbox" id="randomIdle">
+        <span><b>Vary the idle animation</b><i>Rotate through the pet's idle variants at random.</i></span></label>
+      <label class="toggle"><input type="checkbox" id="notify">
+        <span><b>Notifications</b><i>Tell me when a session needs input, breaks, or finishes.</i></span></label>
+      <label class="toggle"><input type="checkbox" id="sound">
+        <span><b>Notification sound</b></span></label>
+      <label class="toggle"><input type="checkbox" id="minimized">
+        <span><b>Hide the pet</b><i>The menubar icon keeps working while it's hidden.</i></span></label>
+      <label class="toggle"><input type="checkbox" id="autoRestore">
+        <span><b>Come back when needed</b><i>Un-hide automatically when a session wants your attention.</i></span></label>
+      <div id="restore-on" class="chips indent"></div>
+      <label class="toggle" id="loginItem-row"><input type="checkbox" id="loginItem">
+        <span><b>Launch at login</b><i id="loginItem-note"></i></span></label>
+    </section>
+
+    <section id="actions-section" hidden>
+      <h2>Make it do something</h2>
+      <div id="actions" class="chips"></div>
+    </section>
+  </main>
+
+  <script src="settings.js"></script>
+</body>
+</html>

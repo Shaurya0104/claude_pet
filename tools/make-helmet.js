@@ -31,14 +31,23 @@ const FRAME_H = 288;
 
 // ------------------------------------------------------------------ palette ---
 const P = {
-  line:     [0x1a, 0x0d, 0x10, 255],
-  redHi:    [0xf0, 0x3a, 0x33, 255],
-  redLo:    [0x7a, 0x10, 0x18, 255],
-  goldHi:   [0xff, 0xd9, 0x6b, 255],
-  goldLo:   [0xa8, 0x72, 0x14, 255],
+  lineRed:  [0x2a, 0x06, 0x0b, 255],   // linework inside red plating
+  lineGold: [0x33, 0x1c, 0x02, 255],   // linework inside gold plating
+  redHi:    [0xe8, 0x44, 0x3a, 255],
+  redMid:   [0xc2, 0x18, 0x1f, 255],
+  redLo:    [0x64, 0x0b, 0x12, 255],
+  goldHi:   [0xff, 0xe0, 0x8a, 255],
+  goldMid:  [0xf0, 0xba, 0x37, 255],
+  goldLo:   [0x8f, 0x5f, 0x0d, 255],
   eyeCore:  [0xea, 0xff, 0xff, 255],
   eyeGlow:  [0x74, 0xe8, 0xff, 255],
+  rim:      [0xff, 0xc9, 0x9a, 255],
 };
+
+/** Three-stop gradient: highlight -> midtone -> shadow. */
+function ramp(hi, mid, lo, t) {
+  return t < 0.5 ? mix(hi, mid, t * 2) : mix(mid, lo, (t - 0.5) * 2);
+}
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const mix = (c1, c2, t) => [
@@ -125,7 +134,25 @@ for (let start = 0; start < W * H; start++) {
 console.log(`found ${regions.length} enclosed regions`);
 
 // ------------------------------------------------------- classify the regions ---
-const CX = W / 2;
+// Measure the silhouette row by row. The helmet tapers hard from brow to chin,
+// so a single global centre line misjudges where "outer edge" is; normalising
+// x against the actual width at each row makes one threshold work everywhere.
+const rowMin = new Int32Array(H).fill(-1);
+const rowMax = new Int32Array(H).fill(-1);
+for (let y = 0; y < H; y++) {
+  for (let x = 0; x < W; x++) {
+    if (kind[y * W + x] !== BG) { if (rowMin[y] < 0) rowMin[y] = x; rowMax[y] = x; }
+  }
+}
+
+/** Horizontal position within the silhouette: 0 at centre, ±1 at the edge. */
+function normX(x, y) {
+  if (rowMin[y] < 0) return 0;
+  const c = (rowMin[y] + rowMax[y]) / 2;
+  const half = Math.max(1, (rowMax[y] - rowMin[y]) / 2);
+  return (x - c) / half;
+}
+
 const RED = 'red', GOLD = 'gold', EYE = 'eye';
 
 // The eye slits: wide, flat, sitting in the upper-middle band, off-centre,
@@ -136,28 +163,75 @@ const eyeCandidates = regions
     r.w > W * 0.14 && r.w < W * 0.48 &&
     r.h < r.w * 0.75 &&
     r.area > W * H * 0.0015 &&
-    Math.abs(r.cx - CX) > W * 0.06)
+    Math.abs(r.cx - W / 2) > W * 0.06)
   .sort((a, b) => b.area - a.area);
 
 const eyes = [];
-const left = eyeCandidates.find((r) => r.cx < CX);
-const right = eyeCandidates.find((r) => r.cx > CX);
-if (left) eyes.push(left);
-if (right) eyes.push(right);
+const leftEye = eyeCandidates.find((r) => r.cx < W / 2);
+const rightEye = eyeCandidates.find((r) => r.cx > W / 2);
+if (leftEye) eyes.push(leftEye);
+if (rightEye) eyes.push(rightEye);
+
+// Mean normalised position per region, so classification uses the region's
+// real footprint rather than a single centroid pixel.
+for (const r of regions) { r.nxSum = 0; r.nySum = 0; }
+for (let y = 0; y < H; y++) {
+  for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (kind[i] !== INSIDE) continue;
+    const r = regions[label[i]];
+    r.nxSum += Math.abs(normX(x, y));
+    r.nySum += y / H;
+  }
+}
+
+/**
+ * Movie-accurate layout: gold is the faceplate — the brow crest, the panels
+ * around the eyes, the cheeks and the mouth. Red is the outer shell: the dome,
+ * the side panels and the outer jaw.
+ */
+const DOME_Y = 0.30;      // above this is the dome
+const CREST_X = 0.34;     // the gold crest is this narrow up in the dome
+const FACE_X = 0.66;      // below the dome, gold reaches this far out
 
 for (const r of regions) {
   if (eyes.includes(r)) { r.kind = EYE; continue; }
-  // Iron Man's gold is the central faceplate: the brow crest up top and the
-  // mouth plate down low. Everything outboard of that is red shell.
-  const central = Math.abs(r.cx - CX) < W * 0.2;
-  if (central && (r.cy < H * 0.26 || r.cy > H * 0.7)) r.kind = GOLD;
-  else r.kind = RED;
+  const nx = r.nxSum / r.area;
+  const ny = r.nySum / r.area;
+  r.nx = nx; r.ny = ny;
+  r.kind = ny < DOME_Y
+    ? (nx < CREST_X ? GOLD : RED)
+    : (nx < FACE_X ? GOLD : RED);
 }
 console.log(`  eyes: ${eyes.length}  gold: ${regions.filter(r => r.kind === GOLD).length}  red: ${regions.filter(r => r.kind === RED).length}`);
+
+// Distance to the silhouette edge, for the rim light. A couple of dilation
+// passes is plenty — we only light the outermost few pixels.
+const nearEdge = new Uint8Array(W * H);
+for (let y = 1; y < H - 1; y++) {
+  for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x;
+    if (kind[i] === BG) continue;
+    if (kind[i - 1] === BG || kind[i + 1] === BG || kind[i - W] === BG || kind[i + W] === BG) {
+      nearEdge[i] = 3;
+    }
+  }
+}
+for (let pass = 2; pass >= 1; pass--) {
+  for (let y = 1; y < H - 1; y++) {
+    for (let x = 1; x < W - 1; x++) {
+      const i = y * W + x;
+      if (kind[i] === BG || nearEdge[i]) continue;
+      if (nearEdge[i - 1] > pass || nearEdge[i + 1] > pass ||
+          nearEdge[i - W] > pass || nearEdge[i + W] > pass) nearEdge[i] = pass;
+    }
+  }
+}
 
 // ------------------------------------------------------------------ 5. paint ---
 const painted = new Canvas(W, H);
 const eyeMaskHi = new Uint8Array(W * H);
+const eyeSideHi = new Uint8Array(W * H);  // 1 = left slit, 2 = right slit
 
 for (let y = 0; y < H; y++) {
   for (let x = 0; x < W; x++) {
@@ -166,32 +240,48 @@ for (let y = 0; y < H; y++) {
 
     if (kind[i] === BG) continue;                       // stays transparent
 
+    const nx = Math.abs(normX(x, y));
+    const ny = y / H;
+    // Which plating is this pixel sitting on? Line pixels have no region of
+    // their own, so fall back to the same rule the regions were classified by.
+    const zoneGold = ny < DOME_Y ? nx < CREST_X : nx < FACE_X;
+
     let c;
     if (kind[i] === LINE) {
-      c = P.line;
+      // Tinting the linework to its surroundings stops the panel seams reading
+      // as flat black scratches over the paint.
+      c = zoneGold ? P.lineGold : P.lineRed;
     } else {
       const r = regions[label[i]];
-      const ty = clamp((y - r.miny) / Math.max(1, r.h), 0, 1);   // top->bottom within the region
-      const gy = clamp(y / H, 0, 1);                             // top->bottom of the helmet
+      const ty = clamp((y - r.miny) / Math.max(1, r.h), 0, 1);   // within the region
+      const gy = clamp(ny, 0, 1);                                // within the helmet
+      const t = ty * 0.4 + gy * 0.6;
 
       if (r.kind === EYE) {
         c = mix(P.eyeCore, P.eyeGlow, ty);
         eyeMaskHi[i] = 255;
+        if (r === leftEye) eyeSideHi[i] = 1;
+        if (r === rightEye) eyeSideHi[i] = 2;
       } else if (r.kind === GOLD) {
-        c = mix(P.goldHi, P.goldLo, ty * 0.55 + gy * 0.45);
+        c = ramp(P.goldHi, P.goldMid, P.goldLo, t);
       } else {
-        c = mix(P.redHi, P.redLo, ty * 0.35 + gy * 0.65);
+        c = ramp(P.redHi, P.redMid, P.redLo, t);
       }
 
       // Specular sheen: a soft diagonal band of light across the upper left,
       // which is what sells a curved metal surface.
-      const d = (x / W) * 0.75 + (y / H) * 1.25;
-      const sheen = Math.exp(-((d - 0.62) ** 2) / 0.02) * (r.kind === EYE ? 0 : 0.42);
+      const d = (x / W) * 0.75 + ny * 1.25;
+      const sheen = Math.exp(-((d - 0.62) ** 2) / 0.022) * (r.kind === EYE ? 0 : 0.38);
       if (sheen > 0.01) c = mix(c, [255, 255, 255, 255], sheen);
 
-      // Vignette the outer edges down so the silhouette reads.
-      const edge = Math.min(x, W - 1 - x) / (W * 0.5);
-      if (edge < 0.35 && r.kind !== EYE) c = mix(c, P.line, (0.35 - edge) * 0.5);
+      // Ambient occlusion into the outer edges so the silhouette reads.
+      if (nx > 0.72 && r.kind !== EYE) c = mix(c, P.lineRed, (nx - 0.72) * 0.9);
+    }
+
+    // Rim light along the outer silhouette — the one cue that makes a flat
+    // fill look like a lit object.
+    if (nearEdge[i] && kind[i] !== LINE) {
+      c = mix(c, P.rim, nearEdge[i] * 0.055);
     }
 
     painted.buf[o] = c[0];
@@ -213,6 +303,18 @@ for (let i = 0; i < W * H; i++) {
   if (eyeMaskHi[i]) { maskHi.buf[i * 4 + 3] = 255; maskHi.buf[i * 4] = 255; maskHi.buf[i * 4 + 1] = 255; maskHi.buf[i * 4 + 2] = 255; }
 }
 const maskSmall = maskHi.downscale(fitW, fitH);
+
+function sideMask(side) {
+  const hi = new Canvas(W, H);
+  for (let i = 0; i < W * H; i++) {
+    if (eyeSideHi[i] === side) {
+      hi.buf[i * 4] = 255; hi.buf[i * 4 + 1] = 255; hi.buf[i * 4 + 2] = 255; hi.buf[i * 4 + 3] = 255;
+    }
+  }
+  return hi.downscale(fitW, fitH);
+}
+const maskL = sideMask(1);
+const maskR = sideMask(2);
 
 const OX = Math.round((FRAME_W - fitW) / 2);
 const OY = Math.round((FRAME_H - fitH) / 2);
@@ -254,7 +356,13 @@ function boxBlur(field, w, h, radius, passes) {
 }
 
 const eyeField = new Float32Array(fitW * fitH);
-for (let i = 0; i < fitW * fitH; i++) eyeField[i] = maskSmall.buf[i * 4 + 3] / 255;
+const eyeFieldL = new Float32Array(fitW * fitH);
+const eyeFieldR = new Float32Array(fitW * fitH);
+for (let i = 0; i < fitW * fitH; i++) {
+  eyeField[i] = maskSmall.buf[i * 4 + 3] / 255;
+  eyeFieldL[i] = maskL.buf[i * 4 + 3] / 255;
+  eyeFieldR[i] = maskR.buf[i * 4 + 3] / 255;
+}
 const bloomField = boxBlur(eyeField, fitW, fitH, 7, 3);
 let bloomMax = 0;
 for (const v of bloomField) if (v > bloomMax) bloomMax = v;
@@ -275,6 +383,7 @@ function drawFrame(opt) {
   const o = {
     dx: 0, dy: 0,
     eye: P.eyeCore, eyeLevel: 1, bloom: 0.75,
+    eyeLevelL: null, eyeLevelR: null,   // override one slit at a time
     desat: 0, dark: 0,
     scanY: null,        // running: bright bar sweeping the eye slits
     shimmer: null,      // ready: diagonal gold sweep
@@ -308,6 +417,8 @@ function drawFrame(opt) {
 
       if (cov > 0) {
         let level = o.eyeLevel;
+        if (o.eyeLevelL !== null && eyeFieldL[idx] > 0.5) level = o.eyeLevelL;
+        if (o.eyeLevelR !== null && eyeFieldR[idx] > 0.5) level = o.eyeLevelR;
         if (o.scanY !== null && Math.abs(y - o.scanY) < 5) level = Math.min(1.6, level + 0.7);
         const q = (py * cv.w + px) * 4;
         if (py >= 0 && py < cv.h && px >= 0 && px < cv.w) {
@@ -320,6 +431,12 @@ function drawFrame(opt) {
 
       const b = bloomField[idx];
       if (b > 0.02) addLight(cv, px, py, o.eye, b * o.bloom * o.eyeLevel * 0.55);
+
+      // Repulsor-style flash: a bright ring pushing out past the bloom.
+      if (o.flash) {
+        const ring = Math.exp(-((b - o.flash.at) ** 2) / 0.012);
+        if (ring > 0.02) addLight(cv, px, py, o.flash.color, ring * o.flash.power);
+      }
     }
   }
 
@@ -393,6 +510,61 @@ const ROWS = [
   ]},
 ];
 
+// Idle variants, picked at random so it does not loop identically forever.
+ROWS.push({ name: 'idle_scan', fps: 8, frames: [
+  { dy: 0, eyeLevel: 0.9, bloom: 0.6, scanY: fitH * 0.40 },
+  { dy: -1, eyeLevel: 0.95, bloom: 0.7, scanY: fitH * 0.44 },
+  { dy: 0, eyeLevel: 0.95, bloom: 0.7, scanY: fitH * 0.48 },
+  { dy: 1, eyeLevel: 0.9, bloom: 0.6, scanY: fitH * 0.52 },
+  { dy: 0, eyeLevel: 0.88, bloom: 0.6 },
+  { dy: -1, eyeLevel: 0.9, bloom: 0.65 },
+]});
+
+ROWS.push({ name: 'idle_look', fps: 4, frames: [
+  { dy: 0, eyeLevelL: 1.0, eyeLevelR: 0.45, bloom: 0.6 },
+  { dy: -1, eyeLevelL: 1.0, eyeLevelR: 0.45, bloom: 0.6 },
+  { dy: 0, eyeLevel: 0.9, bloom: 0.65 },
+  { dy: 1, eyeLevelL: 0.45, eyeLevelR: 1.0, bloom: 0.6 },
+  { dy: 0, eyeLevelL: 0.45, eyeLevelR: 1.0, bloom: 0.6 },
+  { dy: -1, eyeLevel: 0.9, bloom: 0.65 },
+]});
+
+ROWS.push({ name: 'idle_power', fps: 6, frames: [
+  { dy: 0, eyeLevel: 0.2, bloom: 0.1 },
+  { dy: 0, eyeLevel: 0.7, bloom: 0.5 },
+  { dy: -1, eyeLevel: 1.0, bloom: 1.0 },
+  { dy: -2, eyeLevel: 1.0, bloom: 1.2, flash: { at: 0.5, color: P.eyeGlow, power: 0.5 } },
+  { dy: -1, eyeLevel: 1.0, bloom: 0.9 },
+  { dy: 0, eyeLevel: 0.9, bloom: 0.7 },
+]});
+
+// Reactions: play once, then fall back to whatever state we are in.
+ROWS.push({ name: 'poke', fps: 14, frames: [
+  { dy: 6, eyeLevel: 1.3, bloom: 1.1 },
+  { dy: -4, eyeLevel: 1.4, bloom: 1.4, flash: { at: 0.45, color: [255, 255, 255, 255], power: 0.6 } },
+  { dy: 2, eyeLevel: 1.1, bloom: 1.0 },
+  { dy: -1, eyeLevel: 1.0, bloom: 0.85 },
+  { dy: 0, eyeLevel: 0.95, bloom: 0.75 },
+]});
+
+ROWS.push({ name: 'ping', fps: 12, frames: [
+  { dy: 0, eyeLevel: 1.0, bloom: 0.9, shimmer: 0.1 },
+  { dy: -2, eyeLevel: 1.4, bloom: 1.4, shimmer: 0.35, flash: { at: 0.35, color: P.eyeGlow, power: 0.7 } },
+  { dy: -3, eyeLevel: 1.5, bloom: 1.7, shimmer: 0.6, flash: { at: 0.2, color: [255, 255, 255, 255], power: 0.8 } },
+  { dy: -2, eyeLevel: 1.2, bloom: 1.2, shimmer: 0.85 },
+  { dy: 0, eyeLevel: 1.0, bloom: 0.9 },
+  { dy: 0, eyeLevel: 0.95, bloom: 0.8 },
+]});
+
+ROWS.push({ name: 'salute', fps: 8, frames: [
+  { dy: 0, eyeLevel: 0.9, bloom: 0.7 },
+  { dy: 4, eyeLevel: 0.6, bloom: 0.4 },
+  { dy: 5, eyeLevel: 0.5, bloom: 0.3 },
+  { dy: 2, eyeLevel: 1.1, bloom: 1.0 },
+  { dy: -2, eyeLevel: 1.3, bloom: 1.3, shimmer: 0.5 },
+  { dy: 0, eyeLevel: 1.0, bloom: 0.85 },
+]});
+
 const COLS = Math.max(...ROWS.map((r) => r.frames.length));
 const sheet = new Canvas(FRAME_W * COLS, FRAME_H * ROWS.length);
 
@@ -422,6 +594,12 @@ fs.writeFileSync(path.join(OUT_DIR, 'pet.json'), JSON.stringify({
   scale: 0.5,
   rendering: 'auto',
   animations,
+  variants: { idle: ['idle', 'idle_scan', 'idle_look', 'idle_power'] },
+  actions: {
+    poke:   { animation: 'poke', once: true },
+    ping:   { animation: 'ping', once: true, label: 'Repulsor' },
+    salute: { animation: 'salute', once: true, label: 'Salute' },
+  },
   bubbles: {
     needs_input: ['sir, I need you', 'awaiting input', 'you are needed'],
     ready: ['task complete', 'ready for review', 'done, sir'],
@@ -429,6 +607,13 @@ fs.writeFileSync(path.join(OUT_DIR, 'pet.json'), JSON.stringify({
     running: ['working on it', 'processing', 'on it, sir'],
   },
 }, null, 2) + '\n');
+
+// A clean, large render for the app icon. Taken from the painted canvas
+// before the sprite downscale, so the icon is not an upscaled sprite frame.
+const iconH = 780;
+const iconSrc = painted.downscale(Math.round(iconH * (W / H)), iconH);
+fs.writeFileSync(path.join(OUT_DIR, 'icon.png'), iconSrc.png());
+console.log(`wrote ${path.join(OUT_DIR, 'icon.png')}  (icon source, ${iconSrc.w}x${iconSrc.h})`);
 
 const kb = (fs.statSync(path.join(OUT_DIR, 'helmet.png')).size / 1024).toFixed(0);
 console.log(`\nwrote ${path.join(OUT_DIR, 'helmet.png')}  (${sheet.w}x${sheet.h}, ${kb} KB)`);
