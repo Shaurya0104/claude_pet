@@ -23,6 +23,7 @@ let tray = null;
 let state = null;
 let pet = null;
 let panelOpen = false;
+let hovering = false;
 let anchor = null;       // window's bottom-right corner, so it stays put as it resizes
 
 const DEFAULTS = {
@@ -68,6 +69,7 @@ function updateSettings(patch) {
   saveSettings();
 
   if (patch.petId && patch.petId !== prevPet) {
+    traySignature = '';
     try {
       pet = loadPet(patch.petId);
     } catch {
@@ -103,7 +105,18 @@ function effectivePet() {
   return { ...pet, scale: (pet.scale ?? 2) * (settings.sizeScale || 1) };
 }
 
+let petListCache = null;
+
+/** Invalidate after importing a pet, or when the folder is edited by hand. */
+function invalidatePetList() { petListCache = null; }
+
 function listPets() {
+  if (petListCache) return petListCache;
+  petListCache = readPetList();
+  return petListCache;
+}
+
+function readPetList() {
   try {
     return fs.readdirSync(PETS_DIR)
       .filter((d) => fs.existsSync(path.join(PETS_DIR, d, 'pet.json')))
@@ -154,14 +167,18 @@ function sizes() {
   const p = effectivePet();
   const w = Math.round((p?.frameWidth ?? 48) * (p?.scale ?? 2));
   const h = Math.round((p?.frameHeight ?? 48) * (p?.scale ?? 2));
-  // Two sizes only. Resizing on hover looked cheaper, but the resize moved the
-  // layout under the cursor, the next mousemove hit-tested empty space, and the
-  // bar hid itself again — so the buttons flickered and mostly never appeared.
-  // The resting window now always has room for them; they are shown and hidden
-  // in CSS with no layout change at all.
+  // The window is a transparent surface the compositor redraws in full, so at
+  // rest it holds only the pet and room for a speech bubble. It grows for the
+  // action bar on hover and for the session panel when open.
+  //
+  // An earlier attempt at this flickered, because hover *ended* on a hit-test
+  // that ran after the resize had moved the layout under a stationary cursor.
+  // Hover now ends only when the main process sees the real cursor leave the
+  // window, so resizing cannot feed back into it.
   const wide = Math.max(384, w + 56);
   return {
-    collapsed: [wide, h + 214],
+    collapsed: [Math.max(220, w + 56), h + 96],
+    hover: [wide, h + 214],
     expanded: [wide, h + 452],
   };
 }
@@ -181,7 +198,7 @@ function sizes() {
 function clampAnchor({ strict } = { strict: true }) {
   if (!anchor) return;
   const s = sizes();
-  const [w, h] = panelOpen ? s.expanded : s.collapsed;
+  const [w, h] = panelOpen ? s.expanded : hovering ? s.hover : s.collapsed;
   const x = anchor.right - w;
   const y = anchor.bottom - h;
 
@@ -219,7 +236,7 @@ function applyBounds() {
   if (!win || !anchor) return;
   clampAnchor({ strict: true });
   const s = sizes();
-  const [w, h] = panelOpen ? s.expanded : s.collapsed;
+  const [w, h] = panelOpen ? s.expanded : hovering ? s.hover : s.collapsed;
   win.setBounds({
     x: Math.round(anchor.right - w),
     y: Math.round(anchor.bottom - h),
@@ -320,29 +337,63 @@ const TRAY_LABEL = {
   idle: 'idle',
 };
 
-/** Crop frame 0 of the current state out of the sprite sheet for the tray. */
-function trayIcon(stateName) {
+/**
+ * Tray icons, cropped from the sprite sheet — built once per pet.
+ *
+ * This used to call nativeImage.createFromPath on every tray rebuild, which
+ * decodes the whole sheet: 13.4 megapixels, ~51MB, on every state change. That
+ * alone was the main process's CPU. Now the sheet is decoded once, every state
+ * is cropped out of it, and the big image is dropped on the way out — leaving
+ * a handful of 18x18 images.
+ */
+let iconCache = { petId: null, byState: new Map() };
+
+function buildIconCache() {
+  const byState = new Map();
   try {
-    const anim = pet.animations[stateName] || pet.animations.idle;
-    const img = nativeImage.createFromPath(pet.sheetPath).crop({
-      x: 0,
-      y: anim.row * pet.frameHeight,
-      width: pet.frameWidth,
-      height: pet.frameHeight,
-    });
-    return img.resize({ width: 18, height: 18, quality: 'best' });
-  } catch {
-    return nativeImage.createEmpty();
-  }
+    const sheet = nativeImage.createFromPath(pet.sheetPath);
+    for (const [name, anim] of Object.entries(pet.animations || {})) {
+      byState.set(name, sheet.crop({
+        x: 0,
+        y: anim.row * pet.frameHeight,
+        width: pet.frameWidth,
+        height: pet.frameHeight,
+      }).resize({ width: 18, height: 18, quality: 'best' }));
+    }
+  } catch { /* fall through to an empty icon */ }
+  return byState;                 // `sheet` goes out of scope here
 }
+
+function trayIcon(stateName) {
+  if (!pet) return nativeImage.createEmpty();
+  if (iconCache.petId !== pet.id) {
+    iconCache = { petId: pet.id, byState: buildIconCache() };
+  }
+  return iconCache.byState.get(stateName)
+    || iconCache.byState.get('idle')
+    || nativeImage.createEmpty();
+}
+
+let traySignature = '';
 
 function buildTray(snap) {
   if (!tray || !snap) return;
   const { sessions, counts, overall } = snap;
 
+  // Rebuilding a Menu allocates the whole template. The tray only changes when
+  // the state, the session list, or a checked setting does.
+  const sig = JSON.stringify([
+    overall,
+    sessions.map((s) => [s.sessionId, s.state, s.display, s.reason]),
+    settings.petId, settings.sizeScale, settings.animate,
+    settings.notify, settings.minimized,
+  ]);
+  if (sig === traySignature) return;
+  traySignature = sig;
+
   const sessionItems = sessions.length
     ? sessions.slice(0, 20).map((s) => ({
-        label: `${{ needs_input: '!', blocked: '×', ready: '✓', running: '›', idle: '·' }[s.state]}  ${s.name}  —  ${TRAY_LABEL[s.state]}${s.reason ? ` (${s.reason})` : ''}`,
+        label: `${{ needs_input: '!', blocked: '×', ready: '✓', running: '›', idle: '·' }[s.state]}  ${s.display || s.name}  —  ${TRAY_LABEL[s.state]}${s.reason ? ` (${s.reason})` : ''}`,
         click: () => doFocus(s.sessionId),
       }))
     : [{ label: 'no sessions running', enabled: false }];
@@ -459,13 +510,13 @@ function maybeNotify(snap) {
 
     let title = null, body = null;
     if (s.state === 'needs_input') {
-      title = `${s.name} needs you`;
+      title = `${s.display || s.name} needs you`;
       body = s.reason || 'waiting for your input';
     } else if (s.state === 'blocked') {
-      title = `${s.name} is blocked`;
+      title = `${s.display || s.name} is blocked`;
       body = s.reason || 'the turn ended with an error';
     } else if (s.state === 'ready' && prev === 'running') {
-      title = `${s.name} finished`;
+      title = `${s.display || s.name} finished`;
       body = s.message || 'ready for review';
     }
     if (!title) continue;
@@ -650,7 +701,7 @@ ipcMain.on('move-by', (_e, { dx, dy }) => {
   // between monitors should not feel like it is fighting you.
   clampAnchor({ strict: false });
   const s = sizes();
-  const [w, h] = panelOpen ? s.expanded : s.collapsed;
+  const [w, h] = panelOpen ? s.expanded : hovering ? s.hover : s.collapsed;
   win.setBounds({ x: Math.round(anchor.right - w), y: Math.round(anchor.bottom - h), width: w, height: h });
 });
 ipcMain.on('save-position', () => {
@@ -672,9 +723,13 @@ ipcMain.on('reset-position', resetPosition);
  */
 let hoverWatch = null;
 
+let hoverWatchCount = 0;
 ipcMain.on('hover-watch', (_e, on) => {
+  if (process.env.JARVIS_DEBUG) console.log(`[hover-watch] ${on} (#${++hoverWatchCount})`);
   clearInterval(hoverWatch);
   hoverWatch = null;
+  hovering = !!on;
+  applyBounds();
   if (!on || !win) return;
   hoverWatch = setInterval(() => {
     if (!win || win.isDestroyed()) { clearInterval(hoverWatch); hoverWatch = null; return; }
@@ -726,6 +781,7 @@ ipcMain.handle('settings:pickImage', async () => {
 ipcMain.handle('settings:importPet', (_e, opts) => {
   try {
     const r = importPet(opts);
+    invalidatePetList();
     updateSettings({ petId: r.name });
     return { ok: true, ...r };
   } catch (err) {

@@ -29,8 +29,9 @@ let snap = { overall: 'idle', sessions: [], counts: {} };
 let panelOpen = false;
 
 // ------------------------------------------------------------ animation ---
-const ctx = els.pet.getContext('2d');
-let sheet = null;          // decoded sprite sheet
+const ctx = els.pet.getContext('2d', { alpha: true });
+let sheet = null;          // the sprite sheet, pre-scaled to display size
+let sfw = 0, sfh = 0;      // frame size within that pre-scaled sheet, in device px
 let dw = 0, dh = 0;        // css pixels the pet occupies
 
 let animName = 'idle';
@@ -67,17 +68,53 @@ function applyPet(p) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   // Pixel art wants nearest-neighbour; a downscaled detailed sprite wants
   // smoothing, or its edges crawl. The pet decides.
-  ctx.imageSmoothingEnabled = (p.rendering || 'pixelated') !== 'pixelated';
-  ctx.imageSmoothingQuality = 'high';
+  // Nothing is resampled at draw time any more; prescale() did it once.
+  ctx.imageSmoothingEnabled = false;
 
   const img = new Image();
-  img.onload = () => { sheet = img; draw(); };
+  img.onload = () => { sheet = prescale(img); draw(); };
   img.onerror = () => console.log(`failed to load sheet: ${p.sheetUrl}`);
   img.src = p.sheetUrl;
 
   renderActions();
   playingAction = false;
   setRow(pickRow(snap.overall));
+}
+
+/**
+ * Rescale the whole sheet once, into an offscreen canvas at exactly the size
+ * the pet is drawn.
+ *
+ * Otherwise every animation frame downscales 224x288 to 67x86 with
+ * high-quality smoothing — per frame, forever. Measured, that resampling was
+ * the entire running cost: animation on 1.7%, off 0.1%. Doing it once up front
+ * turns each frame into a 1:1 blit.
+ */
+function prescale(img) {
+  const anims = Object.values(pet.animations);
+  const cols = Math.max(...anims.map((a) => a.frames));
+  const rows = Math.max(...anims.map((a) => a.row)) + 1;
+  const dpr = window.devicePixelRatio || 1;
+
+  sfw = Math.max(1, Math.round(dw * dpr));
+  sfh = Math.max(1, Math.round(dh * dpr));
+
+  const off = document.createElement('canvas');
+  off.width = cols * sfw;
+  off.height = rows * sfh;
+  const g = off.getContext('2d');
+  g.imageSmoothingEnabled = (pet.rendering || 'pixelated') !== 'pixelated';
+  g.imageSmoothingQuality = 'high';
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      g.drawImage(
+        img,
+        c * pet.frameWidth, r * pet.frameHeight, pet.frameWidth, pet.frameHeight,
+        c * sfw, r * sfh, sfw, sfh
+      );
+    }
+  }
+  return off;
 }
 
 function setRow(name, once = false) {
@@ -95,11 +132,11 @@ function setRow(name, once = false) {
 function draw() {
   if (!pet || !anim || !sheet) return;
   ctx.clearRect(0, 0, dw, dh);
+  // 1:1 in device pixels — the sheet is already at display size.
   ctx.drawImage(
     sheet,
-    frame * pet.frameWidth, anim.row * pet.frameHeight,   // source frame
-    pet.frameWidth, pet.frameHeight,
-    0, 0, dw, dh                                          // destination
+    frame * sfw, anim.row * sfh, sfw, sfh,
+    0, 0, dw, dh
   );
 }
 
@@ -175,18 +212,26 @@ function scheduleFlourish() {
  * say what is going on — and every so often it plays for a few seconds as a
  * reminder.
  */
-const SETTLE_AFTER_MS = 60000;
-const REMIND_EVERY_MS = 90000;
-const REMIND_FOR_MS = 4000;
+const SETTLE_DEFAULT = { after: 60000, every: 90000, for: 4000 };
 
 let settleTimer = null;
 let remindTimer = null;
 let frozen = false;
+let settleCfg = null;
+
+/** Accepts either a list of state names or a map of per-state timings. */
+function settleFor(state) {
+  const s = pet?.settles;
+  if (!s) return null;
+  if (Array.isArray(s)) return s.includes(state) ? SETTLE_DEFAULT : null;
+  return s[state] ? { ...SETTLE_DEFAULT, ...s[state] } : null;
+}
 
 function clearSettle() {
   clearTimeout(settleTimer); settleTimer = null;
   clearTimeout(remindTimer); remindTimer = null;
   frozen = false;
+  settleCfg = null;
 }
 
 function freeze() {
@@ -194,7 +239,7 @@ function freeze() {
   clearTimeout(timer);
   frame = 0;
   draw();
-  remindTimer = setTimeout(remind, REMIND_EVERY_MS);
+  remindTimer = setTimeout(remind, settleCfg?.every ?? SETTLE_DEFAULT.every);
 }
 
 function remind() {
@@ -202,15 +247,17 @@ function remind() {
   frozen = false;
   frame = 0;
   schedule();
-  remindTimer = setTimeout(() => { if (!playingAction) freeze(); }, REMIND_FOR_MS);
+  remindTimer = setTimeout(() => { if (!playingAction) freeze(); }, settleCfg?.for ?? SETTLE_DEFAULT.for);
 }
 
 /** Called whenever the overall state changes. */
 function armSettle(state) {
   clearSettle();
   if (!opts.animate) return;
-  if (!(pet?.settles || []).includes(state)) return;
-  settleTimer = setTimeout(() => { if (!playingAction) freeze(); }, SETTLE_AFTER_MS);
+  const cfg = settleFor(state);
+  if (!cfg) return;
+  settleCfg = cfg;
+  settleTimer = setTimeout(() => { if (!playingAction) freeze(); }, cfg.after);
 }
 
 function playAction(key) {
@@ -343,7 +390,7 @@ function renderPanel() {
     meta.className = 'meta';
     const name = document.createElement('div');
     name.className = 'name';
-    name.textContent = s.name;
+    name.textContent = s.display || s.name;
     const sub = document.createElement('div');
     sub.className = 'sub';
     sub.textContent = s.reason
@@ -358,7 +405,14 @@ function renderPanel() {
     age.textContent = ago(s.updatedAt);
 
     li.append(dot, meta, age);
-    li.title = `${s.cwd}\npid ${s.pid} · ${s.version || ''}`;
+    // The derived name is what `claude --resume` and session messaging use as
+    // an address, so keep it reachable even when we show the title instead.
+    li.title = [
+      s.display || s.name,
+      s.display && s.display !== s.name ? `session name: ${s.name}` : null,
+      s.cwd,
+      `pid ${s.pid} · ${s.version || ''}`,
+    ].filter(Boolean).join('\n');
     li.addEventListener('click', () => api.focus(s.sessionId));
     els.list.appendChild(li);
   }
@@ -430,10 +484,9 @@ function setHover(on) {
     api.hoverWatch(true);      // main watches the real cursor from here
     return;
   }
-  if (!hovering || hoverOff) return;
-  // Leaving is delayed: the pet and the buttons are separate boxes with a gap
-  // between them, and the cursor crosses that gap on the way to a button.
-  hoverOff = setTimeout(endHover, 400);
+  // Deliberately does nothing. Hover ends only when the main process sees the
+  // real cursor leave the window — a hit-test cannot be trusted here, because
+  // the window resizes on hover and the layout shifts under a still cursor.
 }
 
 function endHover() {

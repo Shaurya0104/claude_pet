@@ -48,7 +48,8 @@ class PetState extends EventEmitter {
       .on('api_error', (e) => this._onApiError(e))
       .on('turn_end', (e) => this._onTurnEnd(e))
       .on('assistant', (e) => this._onAssistant(e))
-      .on('user', (e) => this._onUserMessage(e));
+      .on('user', (e) => this._onUserMessage(e))
+      .on('title', (e) => this._onTitle(e));
 
     this._onSessions(readAll());
     return this;
@@ -56,7 +57,7 @@ class PetState extends EventEmitter {
 
   _mark(sessionId) {
     if (!this.marks.has(sessionId)) {
-      this.marks.set(sessionId, { unread: false, blocked: null, message: null, at: 0 });
+      this.marks.set(sessionId, { unread: false, blocked: null, message: null, at: 0, title: null });
     }
     return this.marks.get(sessionId);
   }
@@ -90,6 +91,14 @@ class PetState extends EventEmitter {
     m.unread = true;
     m.blocked = null;
     m.at = Date.now();
+    this._recompute();
+  }
+
+  /** The `/resume` title, from the transcript. */
+  _onTitle({ sessionId, title }) {
+    const m = this._mark(sessionId);
+    if (m.title === title) return;
+    m.title = title;
     this._recompute();
   }
 
@@ -140,9 +149,20 @@ class PetState extends EventEmitter {
     const sessions = (this._raw || []).map((s) => {
       const m = this.marks.get(s.sessionId);
       const state = this._stateFor(s);
+      // What to call this session in a list.
+      //
+      // A name you set yourself always wins. Otherwise Claude Code's derived
+      // name is just the project plus two characters — the same for every
+      // session in a repo — so prefer the title `/resume` shows, which
+      // actually says what the conversation is about.
+      const renamed = s.nameSource !== 'derived';
+      const title = m?.title || null;
       return {
         ...s,
         state,
+        title,
+        display: renamed ? s.name : (title || s.name),
+        renamed: !!renamed,
         label: LABEL[state],
         reason: s.waitingFor || m?.blocked || null,
         message: m?.message || null,

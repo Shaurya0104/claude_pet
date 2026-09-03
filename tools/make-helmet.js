@@ -762,14 +762,15 @@ const ROWS = [
     { eyeLevel: 0.92, bloom: 0.68 },
   ]},
   // A status the pet holds for minutes at a time, so no bouncing: just the
-  // scanner sweeping the eye slits, slowly.
+  // scanner sweeping the eye slits. Frame 0 is deliberately plain, because
+  // that is the frame it holds between sweeps.
   { name: 'running', fps: 5, frames: [
+    { eyeLevel: 0.92, bloom: 0.76 },
     { eyeLevel: 0.95, bloom: 0.80, scanY: fitH * 0.38 },
     { eyeLevel: 1.00, bloom: 0.88, scanY: fitH * 0.42 },
     { eyeLevel: 1.00, bloom: 0.90, scanY: fitH * 0.46 },
     { eyeLevel: 1.00, bloom: 0.88, scanY: fitH * 0.50 },
     { eyeLevel: 0.95, bloom: 0.80, scanY: fitH * 0.46 },
-    { eyeLevel: 0.92, bloom: 0.76 },
   ]},
   // Loud enough to catch your eye, not so loud it is annoying to sit next to.
   // The renderer settles this to a still frame after a minute anyway.
@@ -936,7 +937,16 @@ fs.writeFileSync(path.join(OUT_DIR, 'pet.json'), JSON.stringify({
   rendering: 'auto',
   animations,
   flourishes: { idle: ['idle_scan', 'idle_look', 'idle_power'] },
-  settles: ['needs_input', 'blocked', 'ready'],
+  // Animating a transparent always-on-top window costs roughly 0.4% CPU per
+  // frame per second, whatever is in the frame. So states the pet holds for a
+  // long time play at full rate in bursts rather than continuously: same
+  // animation, a fraction of the duty cycle.
+  settles: {
+    running:     { after: 4000, every: 13000, for: 3000 },
+    needs_input: { after: 60000, every: 90000, for: 4000 },
+    blocked:     { after: 60000, every: 90000, for: 4000 },
+    ready:       { after: 60000, every: 90000, for: 4000 },
+  },
   boot: 'boot',
   actions: {
     poke:      { animation: 'poke', once: true },

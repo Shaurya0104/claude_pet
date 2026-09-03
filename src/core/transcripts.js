@@ -47,6 +47,64 @@ function transcriptPath(sessionId, cwd) {
 }
 
 /**
+ * The human-readable title Claude Code shows in `/resume`.
+ *
+ * It lives in the transcript as `{"type":"ai-title","aiTitle":"…"}` and is
+ * rewritten as the conversation develops, so the last one wins. Sessions too
+ * young to have been titled fall back to their most recent prompt.
+ *
+ * Only the tail of the file is read — transcripts run to megabytes, and the
+ * newest title is by definition near the end.
+ */
+const TAIL_BYTES = 512 * 1024;
+
+function scanTail(file, bytes) {
+  const st = fs.statSync(file);
+  const start = Math.max(0, st.size - bytes);
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(st.size - start);
+    fs.readSync(fd, buf, 0, buf.length, start);
+    const lines = buf.toString('utf8').split('\n');
+    if (start > 0) lines.shift();          // the first line is a fragment
+    return lines;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function pickTitle(lines) {
+  let title = null;
+  let prompt = null;
+  for (const line of lines) {
+    // Cheap reject before parsing: these two types are rare in a transcript.
+    if (!line.includes('"ai-title"') && !line.includes('"last-prompt"')) continue;
+    try {
+      const d = JSON.parse(line);
+      if (d.type === 'ai-title' && d.aiTitle) title = d.aiTitle;
+      else if (d.type === 'last-prompt' && d.lastPrompt) prompt = d.lastPrompt;
+    } catch { /* torn line */ }
+  }
+  return { title, prompt };
+}
+
+function readTitle(file) {
+  try {
+    let { title, prompt } = pickTitle(scanTail(file, TAIL_BYTES));
+    // A title written early in a long session can fall outside the tail.
+    if (!title && fs.statSync(file).size > TAIL_BYTES) {
+      title = pickTitle(fs.readFileSync(file, 'utf8').split('\n')).title;
+    }
+    if (title) return title;
+    if (prompt) {
+      const one = prompt.replace(/\s+/g, ' ').trim();
+      return one.length > 60 ? `${one.slice(0, 57)}…` : one;
+    }
+  } catch { /* unreadable or gone */ }
+  return null;
+}
+
+/**
  * Does this api_error mean the session is actually stuck, rather than
  * mid-retry? Claude Code recovers from most of these on its own.
  */
@@ -169,6 +227,10 @@ class TranscriptWatcher extends EventEmitter {
       const file = transcriptPath(s.sessionId, s.cwd);
       if (!file) continue;
 
+      // Titles already in the file, before we start following it.
+      const existing = readTitle(file);
+      if (existing) this.emit('title', { sessionId: s.sessionId, title: existing });
+
       const tail = new FileTail(file);
       tail.on('entry', (entry) => this._onEntry(s.sessionId, entry));
       tail.start();
@@ -204,6 +266,11 @@ class TranscriptWatcher extends EventEmitter {
       return;
     }
 
+    if (entry.type === 'ai-title' && entry.aiTitle) {
+      this.emit('title', { sessionId, title: entry.aiTitle });
+      return;
+    }
+
     if (entry.type === 'assistant') {
       const text = assistantText(entry);
       if (text) this.emit('assistant', { sessionId, text });
@@ -221,4 +288,4 @@ class TranscriptWatcher extends EventEmitter {
   }
 }
 
-module.exports = { TranscriptWatcher, transcriptPath, isBlocking, slugify };
+module.exports = { TranscriptWatcher, transcriptPath, isBlocking, slugify, readTitle };

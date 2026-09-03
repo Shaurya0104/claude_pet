@@ -65,7 +65,7 @@ function render(snap) {
   }
 
   lines.push(
-    dim(`  #  ${pad('SESSION', 30)} ${pad('PROJECT', 24)} ${pad('STATE', 11)} ${pad('AGE', 5)} NOTE`)
+    dim(`  #  ${pad('SESSION', 46)} ${pad('PROJECT', 22)} ${pad('STATE', 11)} ${pad('AGE', 5)} NOTE`)
   );
 
   sessions.forEach((s, i) => {
@@ -73,7 +73,7 @@ function render(snap) {
     const note = s.reason || (s.message ? s.message.replace(/\s+/g, ' ').slice(0, 46) : '');
     lines.push(
       `  ${dim(String(i + 1).padStart(2))} ${st.paint(st.icon)} ` +
-        `${pad(s.name, 28)} ${dim(pad(s.project, 24))} ` +
+        `${pad(s.display || s.name, 44)} ${dim(pad(s.project, 22))} ` +
         `${st.paint(pad(st.text, 11))} ${dim(pad(ago(s.updatedAt), 5))} ${dim(note)}`
     );
   });

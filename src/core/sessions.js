@@ -65,6 +65,9 @@ function readAll() {
       pid: s.pid,
       sessionId: s.sessionId,
       name: s.name || `session-${s.pid}`,
+      // Absent means you named it yourself: Claude Code only writes this field
+      // when it made the name up. Do not default it.
+      nameSource: s.nameSource ?? null,
       cwd: s.cwd,
       project: projectName(s.cwd),
       status: s.status || 'idle',

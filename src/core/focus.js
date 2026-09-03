@@ -41,12 +41,43 @@ const TERMINALS = [
   [/Code Helper|Visual Studio Code|(^|\/)Electron$/i, 'Visual Studio Code'],
 ];
 
-/** Editors whose terminals need the extension bridge, and their CLI names. */
+/**
+ * Editors whose terminals need the extension bridge, and where their CLI lives.
+ *
+ * Absolute paths, not bare names: a packaged macOS app inherits
+ * /usr/bin:/bin:/usr/sbin:/sbin and nothing else, so `execFile('cursor', …)`
+ * fails with ENOENT even though it works fine from a shell. That failure was
+ * silent, which is why clicking a session focused the right terminal but never
+ * brought the editor forward or switched Space.
+ */
 const EDITORS = {
-  Cursor: 'cursor',
-  'Visual Studio Code': 'code',
-  Windsurf: 'windsurf',
+  Cursor: [
+    '/usr/local/bin/cursor',
+    '/opt/homebrew/bin/cursor',
+    '/Applications/Cursor.app/Contents/Resources/app/bin/cursor',
+  ],
+  'Visual Studio Code': [
+    '/usr/local/bin/code',
+    '/opt/homebrew/bin/code',
+    '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+  ],
+  Windsurf: [
+    '/usr/local/bin/windsurf',
+    '/opt/homebrew/bin/windsurf',
+    '/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf',
+  ],
 };
+
+/** First of the editor's candidate CLI paths that actually exists. */
+function editorCli(app) {
+  for (const p of EDITORS[app] || []) {
+    try {
+      fs.accessSync(p, fs.constants.X_OK);
+      return p;
+    } catch { /* try the next one */ }
+  }
+  return null;
+}
 
 function ps(fields, pid) {
   try {
@@ -139,17 +170,24 @@ function workspaceFor(cwd) {
   return candidates[0] || null;
 }
 
-function raiseEditorWindow(app, cwd) {
-  const cli = EDITORS[app];
+async function raiseEditorWindow(app, cwd) {
+  const cli = editorCli(app);
   const ws = workspaceFor(cwd);
-  // `cursor <folder>` / `code <folder>` focuses the window already showing
-  // that folder rather than opening a second one.
+
+  // `cursor <folder>` / `code <folder>` picks out the window already showing
+  // that folder, rather than opening a second one or guessing.
+  let viaCli = false;
   if (cli && ws) {
-    return new Promise((resolve) => {
+    viaCli = await new Promise((resolve) => {
       execFile(cli, [ws.folder], { timeout: 5000 }, (err) => resolve(!err));
     });
   }
-  return osascript(`tell application "${app}" to activate`);
+
+  // Then activate, always. Activation is what actually pulls you across
+  // Spaces, and it is the only thing that works when the CLI is missing.
+  const activated = await osascript(`tell application "${app}" to activate`);
+
+  return { ok: viaCli || activated, viaCli, activated, cli };
 }
 
 /** Ask the companion extension to select the terminal owning `pid`. */
@@ -202,12 +240,18 @@ async function focusSession({ pid, cwd }) {
     const raised = await raiseEditorWindow(term.app, cwd);
     const ack = await waitForAck(nonce);
     return {
-      ok: raised || !!ack,
+      ok: raised.ok,
       app: term.app,
       tty,
       exact: !!ack,
       terminal: ack?.terminal || null,
-      reason: ack ? null : 'extension not installed — raised the window only',
+      // Report what actually happened rather than treating the extension's ack
+      // as proof the window came forward — those are different things.
+      raisedVia: raised.viaCli ? 'cli' : raised.activated ? 'activate' : 'nothing',
+      cliPath: raised.cli,
+      reason: raised.ok
+        ? (ack ? null : 'extension not installed — raised the window only')
+        : `could not bring ${term.app} forward`,
     };
   }
 

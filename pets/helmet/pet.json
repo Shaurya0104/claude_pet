@@ -81,11 +81,28 @@
       "idle_power"
     ]
   },
-  "settles": [
-    "needs_input",
-    "blocked",
-    "ready"
-  ],
+  "settles": {
+    "running": {
+      "after": 4000,
+      "every": 13000,
+      "for": 3000
+    },
+    "needs_input": {
+      "after": 60000,
+      "every": 90000,
+      "for": 4000
+    },
+    "blocked": {
+      "after": 60000,
+      "every": 90000,
+      "for": 4000
+    },
+    "ready": {
+      "after": 60000,
+      "every": 90000,
+      "for": 4000
+    }
+  },
   "boot": "boot",
   "actions": {
     "poke": {

@@ -122,6 +122,18 @@ a `kill(pid, 0)` liveness check.
 | `{"subtype":"turn_duration",…}` | `ready` — a turn just finished |
 | `{"type":"assistant",…}` | the message shown on the row |
 | `{"type":"user"}` | you're back; clear the badge |
+| `{"type":"ai-title","aiTitle":"…"}` | the name `/resume` shows |
+
+**Session names.** Claude Code's own name for a session is the project plus two
+characters — `prediction-markets-backend-77` — which is the same for every
+session in a repo and tells you nothing. So the list shows the **title
+`/resume` shows** instead, read from the transcript's `ai-title` entries and
+kept live as Claude Code retitles the conversation.
+
+A name you set yourself always wins. Claude Code only writes `nameSource` when
+it invented the name, so its *absence* means you named it — the field must not
+be defaulted. Hover a row to see the underlying session name, which is what
+`claude --resume` and session messaging take as an address.
 
 Claude Code emits an `api_error` on **every retry attempt** and recovers from
 most of them, so treating any error as "blocked" would cry wolf constantly. A
