@@ -186,20 +186,26 @@ app.whenReady().then(async () => {
     await close(win);
   }
 
-  // 4. settings
+  // 4. settings — captured at the size the window actually opens. Capturing
+  //    the full scroll height gave a 2400px image that rendered as an
+  //    800px-tall sliver in the README.
   {
     const win = new BrowserWindow({
-      width: 460, height: 900, show: false, backgroundColor: '#12171c',
+      width: 460, height: 700, show: false, backgroundColor: '#12171c',
       webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false },
     });
     await ready(win, path.join(ROOT, 'src', 'app', 'settings', 'index.html'));
     await wait(900);
-    // Grow the window to the full page, so nothing is cut off below the fold.
-    const h = await win.webContents.executeJavaScript(
-      'Math.ceil(document.documentElement.scrollHeight)');
-    win.setSize(460, Math.min(2000, h + 24));
-    await wait(600);
     await shoot(win, 'settings.png');
+
+    // and again, scrolled down to the behaviour switches
+    await win.webContents.executeJavaScript(
+      "document.getElementById('animate').closest('section')"
+      // scrollIntoView tucks the section under the sticky title bar, which
+      // clips its first row — back off by the bar's height.
+      + ".scrollIntoView({ block: 'start' }); window.scrollBy(0, -66); null");
+    await wait(500);
+    await shoot(win, 'settings-behaviour.png');
     await close(win);
   }
 

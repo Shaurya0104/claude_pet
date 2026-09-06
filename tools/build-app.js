@@ -29,7 +29,12 @@ const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 
     platform: process.env.JARVIS_PLATFORM || 'darwin',
     arch: process.env.JARVIS_ARCH || process.arch,
     icon: path.join(ROOT, 'build', 'icon'), // packager appends .icns
-    appBundleId: 'dev.jarvis.pet',
+    // macOS caches an app's icon against its bundle id, and Notification
+    // Center reads it from that cache rather than the bundle. An early build
+    // of this app shipped with no icon at all, and the generic one it was
+    // registered with survived every later build and every lsregister reset.
+    // A fresh identifier is the only thing that reliably clears it.
+    appBundleId: 'com.shaurya.jarvis',
     appVersion: version,
     appCopyright: '',
     overwrite: true,

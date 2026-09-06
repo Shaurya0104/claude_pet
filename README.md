@@ -30,7 +30,8 @@ Claude Code names them `prediction-markets-backend-77`, `prediction-markets-back
 ## The fix
 
 <div align="center">
-<img src="docs/panel.png" width="360" alt="The session panel">
+<img src="docs/panel.png" width="380" alt="The session panel">
+<br><sub>Sorted by how much each session needs you. Click a row to land in its terminal.</sub>
 </div>
 
 Click the helmet. Every session, sorted by how much it needs you, **named by
@@ -78,11 +79,12 @@ download and no art to license.
 
 ## Living with it
 
-<div align="center">
-<img src="docs/hover-buttons.png" width="330" alt="Hover buttons">
-&nbsp;&nbsp;
-<img src="docs/bubble.png" width="330" alt="Speech bubble">
-</div>
+<table>
+<tr>
+<td width="50%" align="center"><img src="docs/hover-buttons.png" alt="Hover buttons"><br><sub>Hover for buttons</sub></td>
+<td width="50%" align="center"><img src="docs/bubble.png" alt="Speech bubble"><br><sub>Click the bubble to open the source</sub></td>
+</tr>
+</table>
 
 **Hover** it for buttons. **Click** it for the session list. **Drag** it
 anywhere — it remembers, and it survives you unplugging a monitor.
@@ -108,9 +110,12 @@ node src/cli.js focus 3    # jump to session 3's terminal
 
 ## Making it yours
 
-<div align="center">
-<img src="docs/settings.png" width="330" alt="Settings">
-</div>
+<table>
+<tr>
+<td width="50%" align="center"><img src="docs/settings.png" alt="Settings"><br><sub>Pick a pet, set the size</sub></td>
+<td width="50%" align="center"><img src="docs/settings-behaviour.png" alt="Behaviour settings"><br><sub>Behaviour and hover buttons</sub></td>
+</tr>
+</table>
 
 `Cmd+,` or the menubar. Swap pets, resize from 20% to 200%, pick which hover
 buttons exist, turn the animation off entirely, hide it and have it come back
@@ -210,6 +215,13 @@ view, invisible to AppleScript. So:
    Whichever window finds one of its terminals in that chain calls
    `terminal.show()`. A plain file is the transport on purpose: no ports, no
    auth, and it reaches every window of every editor at once.
+
+> **macOS caches an app icon against its bundle id**, and Notification Center
+> reads it from that cache rather than from the bundle. An early build of this
+> app shipped with no icon at all, and the generic one it got registered with
+> outlived every later build. Builds now re-register with Launch Services and
+> nudge `usernoted` — and the identifier was changed once to shake the old one
+> loose. There is a **Send a test notification** item in the menubar.
 
 > **A packaged Mac app has almost no `PATH`.** It inherits
 > `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else, so `execFile('cursor', …)`
