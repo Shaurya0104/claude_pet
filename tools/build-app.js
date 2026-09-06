@@ -59,6 +59,21 @@ const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 
     console.log('codesign failed (the app will still run locally)');
   }
 
+  // macOS caches an app's icon against its bundle id, and Notification Center
+  // reads it from there rather than from the bundle each time. An early build
+  // of this app shipped without an icon, and that generic one stuck — so
+  // re-register the bundle and nudge the notification daemon on every build.
+  try {
+    const lsregister = '/System/Library/Frameworks/CoreServices.framework/'
+      + 'Frameworks/LaunchServices.framework/Support/lsregister';
+    execFileSync('touch', [app]);
+    execFileSync(lsregister, ['-f', app], { stdio: 'ignore' });
+    execFileSync('killall', ['usernoted'], { stdio: 'ignore' });
+    console.log('re-registered with Launch Services');
+  } catch {
+    console.log('could not re-register with Launch Services (icons may be stale)');
+  }
+
   console.log(`\nbuilt ${app}`);
   console.log('\nInstall it with:');
   console.log(`  cp -r "${app}" /Applications/`);

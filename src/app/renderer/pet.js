@@ -342,10 +342,11 @@ function renderActions() {
     }, 'A headline, from a different outlet each time');
   }
 
-  // Keep the grid tidy when there are three or fewer.
+  // Three across, or fewer if that is all there is.
   const n = els.actions.childElementCount;
-  els.actions.style.gridTemplateColumns = `repeat(${Math.min(3, Math.max(1, n))}, 1fr)`;
-  els.actions.style.width = n <= 3 ? 'auto' : '268px';
+  els.actions.style.gridTemplateColumns =
+    `repeat(${Math.min(3, Math.max(1, n))}, minmax(0, 1fr))`;
+  els.actions.style.width = n <= 3 ? 'auto' : '276px';
 
   els.actions.hidden = !hovering || n === 0;
   console.log(`actions: ${n} [${[...els.actions.children].map((b) => b.textContent).join(', ')}]`);

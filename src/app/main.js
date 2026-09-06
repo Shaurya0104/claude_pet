@@ -459,6 +459,17 @@ function buildTray(snap) {
     },
     { type: 'separator' },
     { label: 'Reset position', click: resetPosition },
+    {
+      label: 'Send a test notification',
+      click: () => {
+        if (!Notification.isSupported()) return;
+        new Notification({
+          title: 'Jarvis',
+          body: 'If this shows the helmet, the icon is right.',
+          silent: !settings.sound,
+        }).show();
+      },
+    },
     { label: 'Settings…', accelerator: 'CommandOrControl+,', click: openSettings },
     { label: 'Open pets folder', click: () => shell.openPath(PETS_DIR) },
     { type: 'separator' },

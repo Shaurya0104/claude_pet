@@ -125,29 +125,38 @@ html, body {
 #panel .titlebar-actions { display: flex; gap: 6px; }
 
 /* Buttons that make the pet do something, above the panel. */
+/* A fixed three-column grid, so the buttons line up in tidy rows instead of
+   wrapping into ragged right-aligned runs of different widths.
+   minmax(0, 1fr), not 1fr: a bare 1fr has an auto minimum, so a long label
+   widens its own column and the row stops being three across. */
 #actions {
-  display: flex;
-  flex-wrap: wrap;          /* six buttons never fit on one line at pet width */
-  justify-content: flex-end;
-  gap: 6px;
-  padding: 6px;
-  max-width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 7px;
+  width: 276px;
   border-radius: 12px;
-  background: rgba(18, 23, 28, .94);
+  background: rgba(18, 23, 28, .95);
   border: 1px solid rgba(255,255,255,.10);
-  box-shadow: 0 8px 24px rgba(0,0,0,.42);
-  animation: pop .16s ease;
+  box-shadow: 0 10px 28px rgba(0,0,0,.45);
+  animation: pop .14s ease;
 }
+
 #actions button {
   background: rgba(255,255,255,.07);
   border: 0; border-radius: 7px;
   color: #cdd9e2;
-  padding: 5px 10px;
+  padding: 6px 4px;
   font-size: 11px;
+  line-height: 1.2;
   cursor: pointer;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
 }
-#actions button:hover { background: rgba(255,255,255,.16); color: #fff; }
+#actions button:hover:not(:disabled) { background: rgba(255,255,255,.17); color: #fff; }
+#actions button:disabled { opacity: .45; cursor: default; }
 
 #panel header, #panel footer {
   display: flex; align-items: center; justify-content: space-between;

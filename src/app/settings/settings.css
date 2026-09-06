@@ -21,6 +21,10 @@ body {
 
 main { padding: 0 22px 30px; display: flex; flex-direction: column; gap: 24px; }
 
+/* Author styles beat the user-agent's [hidden] rule regardless of specificity,
+   so `section { display: flex }` kept the import panel permanently open. */
+[hidden] { display: none !important; }
+
 section { display: flex; flex-direction: column; gap: 10px; }
 h2 {
   font-size: 10.5px; font-weight: 700; letter-spacing: .09em;

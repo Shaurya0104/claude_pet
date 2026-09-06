@@ -22,7 +22,8 @@
     "uninstall-extension": "node tools/install-extension.js --remove",
     "add-pet": "node tools/add-pet.js",
     "docs": "node tools/make-docs-images.js",
-    "helmet": "node tools/make-helmet.js"
+    "helmet": "node tools/make-helmet.js",
+    "shots": "electron tools/make-shots.js"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
